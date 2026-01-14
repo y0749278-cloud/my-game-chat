@@ -1,7 +1,6 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -13,121 +12,117 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Private Game Chat</title>
+    <title>G-Chat Pro</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #e5ddd5; margin: 0; display: flex; height: 100vh; }
-        #sidebar { width: 260px; background: #075e54; color: white; display: flex; flex-direction: column; padding: 15px; box-sizing: border-box; }
-        .sidebar-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; text-align: center; }
-        .create-chat { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
-        .create-chat input { padding: 8px; border-radius: 5px; border: none; outline: none; }
-        .create-chat button { background: #25d366; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        #chat-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
-        .chat-item { background: #128c7e; padding: 10px; border-radius: 8px; cursor: pointer; transition: 0.3s; font-size: 14px; }
-        .chat-item:hover { background: #0b6b5d; }
-        .chat-item.active { background: #25d366; }
+        :root { --bg: #0b0e14; --panel: #1a1d23; --accent: #00ff88; --text: #e0e0e0; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; }
+        #sidebar { width: 280px; background: var(--panel); border-right: 2px solid #2a2d33; display: flex; flex-direction: column; }
+        .side-header { padding: 20px; text-align: center; border-bottom: 1px solid #2a2d33; }
+        .id-label { font-size: 11px; color: var(--accent); letter-spacing: 1px; }
+        .input-box { padding: 15px; }
+        .input-box input { width: 100%; padding: 12px; background: #000; border: 1px solid var(--accent); color: var(--accent); border-radius: 5px; outline: none; box-sizing: border-box; }
+        #chat-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .chat-item { padding: 12px; background: #222; margin-bottom: 5px; border-radius: 4px; cursor: pointer; border-left: 3px solid transparent; }
+        .chat-item.active { border-left-color: var(--accent); background: #2a2a2a; }
         #main { flex: 1; display: flex; flex-direction: column; }
-        #chat-header { background: #075e54; color: white; padding: 15px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
-        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); }
-        .message { max-width: 75%; padding: 8px 12px; border-radius: 10px; font-size: 14px; position: relative; }
-        .sent { align-self: flex-end; background: #dcf8c6; }
-        .received { align-self: flex-start; background: white; }
-        #form { display: flex; padding: 15px; background: #f0f0f0; }
-        #input { flex: 1; padding: 12px; border: none; border-radius: 25px; outline: none; }
-        #send-btn { background: #075e54; color: white; border: none; padding: 0 20px; border-radius: 25px; margin-left: 10px; cursor: pointer; }
+        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .m { max-width: 80%; padding: 10px 15px; border-radius: 8px; font-size: 14px; }
+        .m.sent { align-self: flex-end; background: var(--accent); color: #000; }
+        .m.received { align-self: flex-start; background: #333; }
+        #footer { padding: 15px; background: var(--panel); display: flex; gap: 10px; }
+        #msg-in { flex: 1; padding: 12px; background: #000; border: 1px solid #444; color: #fff; border-radius: 5px; outline: none; }
+        #send-btn { background: var(--accent); border: none; padding: 0 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
     </style>
 </head>
 <body>
     <div id="sidebar">
-        <div class="sidebar-header">МОИ ЧАТЫ</div>
-        <div class="create-chat">
-            <input id="target-id" placeholder="Введи ID друга..." />
-            <button onclick="startPrivateChat()">СОЗДАТЬ ЧАТ</button>
+        <div class="side-header">
+            <div style="font-weight:bold; font-size: 18px;">G-CHAT PRIVATE</div>
+            <div class="id-label" id="my-id">Загрузка...</div>
         </div>
-        <div id="chat-list">
-            <div class="chat-item active" onclick="joinRoom('Global')">Глобальный чат</div>
+        <div class="input-box">
+            <input id="add-id" placeholder="Напиши user12345" oninput="validateInput(this)">
         </div>
+        <div id="chat-list"></div>
     </div>
     <div id="main">
-        <div id="chat-header">
-            <span id="room-name">Чат: Global</span>
-            <span id="display-id" style="font-size: 12px; opacity: 0.8;"></span>
-        </div>
         <div id="messages"></div>
-        <form id="form">
-            <input id="input" autocomplete="off" placeholder="Напишите сообщение..." />
-            <button id="send-btn">-></button>
+        <form id="footer">
+            <input id="msg-in" placeholder="Сообщение..." autocomplete="off">
+            <button type="submit">OK</button>
         </form>
     </div>
-
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let myId = localStorage.getItem('chat_user_id') || "ID-" + Math.floor(Math.random() * 90000 + 10000);
-        localStorage.setItem('chat_user_id', myId);
-        
-        document.getElementById('display-id').innerText = "Твой ID: " + myId;
-        let currentRoom = 'Global';
-
-        function startPrivateChat() {
-            const target = document.getElementById('target-id').value.trim();
-            if (!target || target === myId) return alert("Введи корректный ID друга!");
-            
-            // Генерируем секретное имя комнаты на основе двух ID
-            const roomName = [myId, target].sort().join("_");
-            
-            if (!document.getElementById('chat-' + roomName)) {
-                const item = document.createElement('div');
-                item.id = 'chat-' + roomName;
-                item.className = 'chat-item';
-                item.innerText = 'Чат с ' + target;
-                item.onclick = () => joinRoom(roomName, item);
-                document.getElementById('chat-list').appendChild(item);
+        let myNum = localStorage.getItem('chat_num') || Math.floor(Math.random()*90000+10000);
+        localStorage.setItem('chat_num', myNum);
+        const myId = "user" + myNum;
+        document.getElementById('my-id').innerText = "ТВОЙ ID: " + myId;
+        let history = JSON.parse(localStorage.getItem('chat_history') || '{}');
+        let currentRoom = null;
+        if (Notification.permission !== "granted") Notification.requestPermission();
+        function validateInput(el) {
+            el.value = el.value.toLowerCase().replace(/[^user0-9]/g, '');
+            if (el.value.length >= 9 && el.value.startsWith('user')) {
+                startChat(el.value);
+                el.value = '';
             }
-            joinRoom(roomName);
-            document.getElementById('target-id').value = '';
         }
-
-        function joinRoom(name, element) {
-            currentRoom = name;
-            document.getElementById('room-name').innerText = "Чат: " + name;
-            document.getElementById('messages').innerHTML = "";
-            socket.emit('join', { room: name, user: myId });
-            
-            document.querySelectorAll('.chat-item').forEach(i => i.classList.remove('active'));
-            if (element) element.classList.add('active');
+        function startChat(target) {
+            if (target === myId) return;
+            const room = [myId, target].sort().join("_");
+            if (!history[room]) history[room] = { name: target, msgs: [] };
+            save(); renderList(); join(room);
         }
-
-        document.getElementById('form').addEventListener('submit', (e) => {
+        function join(room) {
+            currentRoom = room;
+            socket.emit('join', { room });
+            renderMessages(); renderList();
+        }
+        function renderList() {
+            const list = document.getElementById('chat-list');
+            list.innerHTML = '';
+            Object.keys(history).forEach(r => {
+                const div = document.createElement('div');
+                div.className = 'chat-item ' + (currentRoom === r ? 'active' : '');
+                div.innerText = history[r].name;
+                div.onclick = () => join(r);
+                list.appendChild(div);
+            });
+        }
+        function renderMessages() {
+            const box = document.getElementById('messages');
+            box.innerHTML = '';
+            if (!currentRoom) return;
+            history[currentRoom].msgs.forEach(m => {
+                const d = document.createElement('div');
+                d.className = 'm ' + (m.s === myId ? 'sent' : 'received');
+                d.innerText = m.t;
+                box.appendChild(d);
+            });
+            box.scrollTop = box.scrollHeight;
+        }
+        function save() { localStorage.setItem('chat_history', JSON.stringify(history)); }
+        document.getElementById('footer').onsubmit = (e) => {
             e.preventDefault();
-            const input = document.getElementById('input');
-            if (input.value) {
-                socket.emit('chat message', { room: currentRoom, user: myId, text: input.value });
+            const input = document.getElementById('msg-in');
+            if (input.value && currentRoom) {
+                socket.emit('chat message', { room: currentRoom, s: myId, t: input.value });
                 input.value = '';
             }
-        });
-
+        };
         socket.on('chat message', (data) => {
-            // Если пришло сообщение в личку, которой нет в списке — создаем её
-            if (data.room.includes(myId) && data.room !== 'Global' && !document.getElementById('chat-' + data.room)) {
-                const otherUser = data.room.replace(myId, "").replace("_", "");
-                const item = document.createElement('div');
-                item.id = 'chat-' + data.room;
-                item.className = 'chat-item';
-                item.innerText = 'Чат с ' + otherUser;
-                item.onclick = () => joinRoom(data.room, item);
-                document.getElementById('chat-list').appendChild(item);
+            if (!history[data.room]) {
+                const other = data.room.replace(myId, "").replace("_", "");
+                history[data.room] = { name: other, msgs: [] };
             }
-
-            if (data.room !== currentRoom) return;
-            
-            const item = document.createElement('div');
-            item.className = 'message ' + (data.user === myId ? 'sent' : 'received');
-            item.innerHTML = '<span style="font-size:10px; display:block; font-weight:bold;">' + data.user + '</span>' + data.text;
-            document.getElementById('messages').appendChild(item);
-            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+            history[data.room].msgs.push(data);
+            save();
+            if (data.room === currentRoom) renderMessages();
+            else if (data.s !== myId) new Notification("Сообщение от " + data.s, { body: data.t });
         });
-
-        socket.emit('join', { room: 'Global', user: myId });
+        renderList();
     </script>
 </body>
 </html>
@@ -138,11 +133,4 @@ io.on('connection', (socket) => {
     socket.on('join', (data) => socket.join(data.room));
     socket.on('chat message', (data) => io.to(data.room).emit('chat message', data));
 });
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => { console.log('Private Chat Online'); });
-
-
-
-
-
+server.listen(process.env.PORT || 3000);
