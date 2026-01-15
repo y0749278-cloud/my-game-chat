@@ -3,77 +3,38 @@ const http = require('http');
 const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-    maxHttpBufferSize: 1e8 // Разрешаем файлы до 100 МБ
-});
+const io = new Server(server, { maxHttpBufferSize: 1e8 });
 
-// --- ПАМЯТЬ СЕРВЕРА (История сообщений) ---
-// Здесь мы храним сообщения, чтобы они не пропадали при смене устройства
+// ХРАНИЛИЩЕ ИСТОРИИ (Последние 100 сообщений)
 let messageHistory = []; 
 
 io.on('connection', (socket) => {
-    // 1. При подключении отправляем ID
-    socket.emit('me', socket.id);
     
-    // 2. ВХОД В КОМНАТУ + ЗАГРУЗКА ИСТОРИИ
+    // Когда юзер заходит, он сразу просит историю
     socket.on('join_room', (room) => {
-        socket.leaveAll();
         socket.join(room);
-        
-        // Фильтруем сообщения только для этой комнаты
-        const roomHistory = messageHistory.filter(msg => msg.room === room);
-        // Отправляем историю этому конкретному пользователю
-        socket.emit('load_history', roomHistory);
-        
-        socket.emit('room_joined', room);
+        // Отправляем только сообщения этой комнаты
+        const roomMsgs = messageHistory.filter(m => m.room === room);
+        socket.emit('load_history', roomMsgs);
     });
 
-    // 3. Сохранение и отправка ТЕКСТА
-    socket.on('send_text', (data) => {
-        const msgData = {
-            type: 'text',
+    // ОБРАБОТКА СООБЩЕНИЙ (Текст, Фото, Голос)
+    socket.on('send_msg', (data) => {
+        // data.userId приходит от клиента (числовой)
+        const msgObject = {
+            type: data.type, // 'text', 'image', 'audio'
             room: data.room,
-            user: data.user,
-            text: data.text,
-            id: socket.id,
+            userId: data.userId, // Тот самый вечный цифровой ID
+            content: data.content,
             time: new Date().toLocaleTimeString().slice(0,5)
         };
-        messageHistory.push(msgData); // Запоминаем в истории
-        if(messageHistory.length > 100) messageHistory.shift(); // Удаляем старые, если больше 100
-        
-        io.to(data.room).emit('receive_message', msgData);
-    });
 
-    // 4. Сохранение и отправка ФОТО
-    socket.on('send_image', (data) => {
-        const msgData = {
-            type: 'image',
-            room: data.room,
-            user: data.user,
-            image: data.image,
-            id: socket.id,
-            time: new Date().toLocaleTimeString().slice(0,5)
-        };
-        messageHistory.push(msgData);
-        if(messageHistory.length > 100) messageHistory.shift();
+        // Сохраняем в историю
+        messageHistory.push(msgObject);
+        if(messageHistory.length > 150) messageHistory.shift(); // Чистим старое
 
-        io.to(data.room).emit('receive_message', msgData);
-    });
-
-    // 5. Сохранение и отправка ГОЛОСОВЫХ
-    socket.on('send_audio', (data) => {
-        const msgData = {
-            type: 'audio',
-            room: data.room,
-            user: data.user,
-            audio: data.audio,
-            id: socket.id,
-            time: new Date().toLocaleTimeString().slice(0,5)
-        };
-        messageHistory.push(msgData);
-        if(messageHistory.length > 100) messageHistory.shift();
-
-        io.to(data.room).emit('receive_message', msgData);
+        // Отправляем всем в комнате
+        io.to(data.room).emit('new_msg', msgObject);
     });
 });
 
@@ -83,60 +44,61 @@ app.get('/', (req, res) => {
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>G-Chat History</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>G-Chat FIXED</title>
     <style>
         :root { --bg: #0f0b1e; --panel: #1a162e; --accent: #7c3aed; --mine: #6d28d9; --text: #e9d5ff; }
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        * { box-sizing: border-box; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; }
+
+        /* БОКОВОЕ МЕНЮ (АДАПТИВНОЕ) */
+        #sidebar { width: 260px; background: var(--panel); border-right: 1px solid #2e1065; display: flex; flex-direction: column; transition: 0.3s; z-index: 1000; }
+        .header { padding: 20px; background: #2e1065; text-align: center; font-weight: bold; border-bottom: 1px solid #4c1d95; }
+        .my-id-display { font-size: 12px; color: #a78bfa; margin-top: 5px; }
         
-        /* БОКОВАЯ ПАНЕЛЬ */
-        #sidebar { width: 260px; background: var(--panel); border-right: 1px solid #2e1065; display: flex; flex-direction: column; }
-        .header { padding: 20px; background: #2e1065; font-weight: bold; font-size: 18px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        .my-id { font-size: 11px; color: #a78bfa; margin-top: 5px; text-align: center; }
         #rooms-list { flex: 1; padding: 10px; overflow-y: auto; }
-        .room-btn { padding: 12px; margin-bottom: 5px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; }
-        .room-btn:hover { background: rgba(124, 58, 237, 0.3); }
-        .room-btn.active { background: var(--accent); }
-        
+        .room-btn { padding: 12px; margin-bottom: 5px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; }
+        .room-btn.active { background: var(--accent); color: white; }
+
         /* ОСНОВНОЙ ЧАТ */
-        #chat-area { flex: 1; display: flex; flex-direction: column; background: radial-gradient(circle at top, #1e1b4b, #0f0b1e); position: relative; }
-        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        #chat-area { flex: 1; display: flex; flex-direction: column; position: relative; background: radial-gradient(circle at top, #1e1b4b, #0f0b1e); width: 100%; }
         
+        /* КНОПКА МЕНЮ (ТОЛЬКО НА МОБИЛКАХ) */
+        .burger-btn { display: none; position: absolute; top: 10px; left: 10px; z-index: 50; background: var(--accent); border: none; color: white; padding: 8px 12px; border-radius: 5px; font-size: 20px; cursor: pointer; }
+
         /* СООБЩЕНИЯ */
-        .msg { max-width: 75%; padding: 10px 14px; border-radius: 16px; position: relative; font-size: 15px; word-wrap: break-word; }
-        .msg.them { align-self: flex-start; background: #2e1065; border-bottom-left-radius: 4px; }
-        .msg.me { align-self: flex-end; background: var(--mine); border-bottom-right-radius: 4px; }
-        .msg img { max-width: 100%; border-radius: 10px; margin-top: 5px; }
-        .msg audio { max-width: 200px; margin-top: 5px; }
-        .meta { font-size: 10px; opacity: 0.6; display: flex; justify-content: flex-end; gap: 5px; margin-top: 4px; }
-        .sender-name { font-size: 10px; color: #a78bfa; margin-bottom: 2px; font-weight: bold; }
-
-        /* ПАНЕЛЬ ВВОДА */
-        #input-zone { padding: 15px; background: var(--panel); display: flex; align-items: center; gap: 10px; border-top: 1px solid #2e1065; }
-        .icon-btn { background: none; border: none; font-size: 24px; cursor: pointer; padding: 5px; color: #a78bfa; transition: 0.2s; }
-        .icon-btn:active { transform: scale(0.9); }
-        input[type="text"] { flex: 1; background: #0a0814; border: 1px solid #4c1d95; color: white; padding: 12px; border-radius: 20px; outline: none; }
-        .send-btn { background: var(--accent); border: none; width: 45px; height: 45px; border-radius: 50%; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; padding-top: 50px; }
+        .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; position: relative; word-wrap: break-word; }
+        .msg.them { align-self: flex-start; background: #2e1065; border-bottom-left-radius: 2px; }
+        .msg.me { align-self: flex-end; background: var(--mine); border-bottom-right-radius: 2px; }
         
-        #file-input { display: none; }
+        .sender-id { font-size: 9px; color: #a78bfa; margin-bottom: 3px; font-weight: bold; }
+        .msg img { max-width: 100%; border-radius: 8px; margin-top: 5px; }
+        .msg audio { max-width: 200px; margin-top: 5px; }
+        .time { font-size: 9px; opacity: 0.6; text-align: right; margin-top: 4px; }
 
-        /* МОБИЛЬНАЯ АДАПТАЦИЯ */
-        @media (max-width: 600px) {
-            #sidebar { display: none; position: absolute; z-index: 100; height: 100%; width: 80%; }
-            #sidebar.active { display: flex; }
-            .menu-toggle { display: block; position: fixed; top: 15px; left: 15px; z-index: 101; background: var(--accent); color: white; border: none; padding: 8px; border-radius: 5px; font-size: 20px; cursor: pointer; }
+        /* НИЖНЯЯ ПАНЕЛЬ */
+        #input-zone { padding: 10px; background: var(--panel); display: flex; align-items: center; gap: 8px; border-top: 1px solid #2e1065; }
+        input[type="text"] { flex: 1; background: #0a0814; border: 1px solid #4c1d95; color: white; padding: 10px; border-radius: 20px; outline: none; }
+        .icon-btn { font-size: 22px; background: none; border: none; cursor: pointer; padding: 5px; }
+        .send-btn { background: var(--accent); border: none; width: 40px; height: 40px; border-radius: 50%; color: white; font-size: 18px; cursor: pointer; }
+
+        /* МОБИЛЬНАЯ ВЕРСИЯ (САМОЕ ВАЖНОЕ) */
+        @media (max-width: 768px) {
+            #sidebar { position: fixed; left: -100%; height: 100%; width: 240px; box-shadow: 2px 0 10px black; }
+            #sidebar.open { left: 0; }
+            .burger-btn { display: block; } /* Показываем кнопку меню */
         }
-        @media (min-width: 601px) { .menu-toggle { display: none; } }
     </style>
 </head>
 <body>
 
-    <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+    <button class="burger-btn" onclick="toggleMenu()">☰</button>
 
     <div id="sidebar">
         <div class="header">
-            G-CHAT <br>
-            <div class="my-id" id="my-id">Подключение...</div>
+            G-CHAT
+            <div class="my-id-display" id="disp-id">ID: ...</div>
         </div>
         <div id="rooms-list">
             <div class="room-btn active" onclick="switchRoom('General')"># General</div>
@@ -148,145 +110,128 @@ app.get('/', (req, res) => {
         <div id="messages"></div>
         
         <div id="input-zone">
-            <label for="file-input" class="icon-btn">📎</label>
-            <input type="file" id="file-input" accept="image/*" onchange="sendPhoto()">
-            
-            <input type="text" id="msg-input" placeholder="Сообщение..." autocomplete="off">
-            
-            <button class="icon-btn" id="mic-btn" onmousedown="startRecord()" onmouseup="stopRecord()" ontouchstart="startRecord()" ontouchend="stopRecord()">🎤</button>
-            
-            <button class="send-btn" onclick="sendText()">➤</button>
+            <label class="icon-btn">📎<input type="file" id="file-in" hidden accept="image/*" onchange="sendFile()"></label>
+            <input type="text" id="msg-in" placeholder="Сообщение..." autocomplete="off">
+            <button class="icon-btn" id="mic-btn" onmousedown="recStart()" onmouseup="recStop()" ontouchstart="recStart()" ontouchend="recStop()">🎤</button>
+            <button class="send-btn" onclick="sendTxt()">➤</button>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let myId = "";
-        let currentRoom = "General";
+        let currentRoom = 'General';
         
+        // --- 1. ВЕЧНЫЙ ЦИФРОВОЙ ID ---
+        // Проверяем, есть ли уже ID в телефоне
+        let myUserId = localStorage.getItem('gchat_uid');
+        
+        if (!myUserId) {
+            // Если нет, генерируем случайное число от 10000 до 99999
+            myUserId = Math.floor(10000 + Math.random() * 90000);
+            localStorage.setItem('gchat_uid', myUserId); // Сохраняем навсегда
+        }
+        
+        document.getElementById('disp-id').innerText = "Твой ID: " + myUserId;
+
+        // --- 2. ПОДКЛЮЧЕНИЕ ---
         socket.on('connect', () => {
-             // При подключении сразу просимся в комнату, чтобы получить историю
-             socket.emit('join_room', currentRoom);
+            console.log("Connected");
+            socket.emit('join_room', currentRoom);
         });
 
-        socket.on('me', (id) => {
-            myId = id;
-            document.getElementById('my-id').innerText = "ID: " + id.substr(0, 5);
-            requestNotify();
+        // Загрузка истории
+        socket.on('load_history', (msgs) => {
+            document.getElementById('messages').innerHTML = ''; // Чистим
+            msgs.forEach(m => renderMsg(m));
         });
 
-        // --- УВЕДОМЛЕНИЯ ---
-        function requestNotify() {
-            if (Notification.permission !== "granted") Notification.requestPermission();
-        }
-        function showNotify(user, text) {
-            if (document.hidden && Notification.permission === "granted") {
-                new Notification("G-Chat: " + user, { body: text });
-            }
-        }
-
-        // --- ЛОГИКА ОТПРАВКИ ---
-        function sendText() {
-            const input = document.getElementById('msg-input');
-            if (input.value.trim()) {
-                socket.emit('send_text', { room: currentRoom, text: input.value, user: "Я" });
-                input.value = '';
-            }
-        }
-
-        function sendPhoto() {
-            const file = document.getElementById('file-input').files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    socket.emit('send_image', { room: currentRoom, image: evt.target.result, user: "Я" });
-                };
-                reader.readAsDataURL(file);
-            }
-        }
-
-        // --- ГОЛОСОВЫЕ ---
-        let mediaRecorder;
-        let audioChunks = [];
-
-        async function startRecord() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                mediaRecorder.start();
-                audioChunks = [];
-                document.getElementById('mic-btn').style.color = "red";
-                
-                mediaRecorder.ondataavailable = event => { audioChunks.push(event.data); };
-                
-                mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                         socket.emit('send_audio', { room: currentRoom, audio: e.target.result, user: "Я" });
-                    }
-                    reader.readAsDataURL(audioBlob);
-                    document.getElementById('mic-btn').style.color = "#a78bfa";
-                };
-            } catch(e) { alert("Нужен доступ к микрофону!"); }
-        }
-        function stopRecord() { if(mediaRecorder) mediaRecorder.stop(); }
-
-        // --- ПРИЕМ И ОТОБРАЖЕНИЕ ---
-        // 1. Загрузка старых сообщений (История)
-        socket.on('load_history', (history) => {
-            document.getElementById('messages').innerHTML = ''; // Чистим чат перед загрузкой
-            history.forEach(msg => renderMessage(msg));
+        // Новое сообщение
+        socket.on('new_msg', (msg) => {
+            renderMsg(msg);
         });
 
-        // 2. Прием нового сообщения
-        socket.on('receive_message', (data) => {
-            renderMessage(data);
-            if(data.id !== myId) showNotify("Новое сообщение", data.type === 'text' ? data.text : "Медиафайл");
-        });
-
-        function renderMessage(data) {
+        // --- 3. ОТРИСОВКА ---
+        function renderMsg(msg) {
             const div = document.createElement('div');
-            div.className = 'msg ' + (data.id === myId ? 'me' : 'them');
+            // Сравниваем ID из сообщения с твоим сохраненным ID
+            const isMe = (msg.userId == myUserId);
+            
+            div.className = 'msg ' + (isMe ? 'me' : 'them');
             
             let content = '';
-            // Если это чужое сообщение, показываем ID/Имя
-            if(data.id !== myId) content += \`<div class="sender-name">\${data.user} (\${data.id.substr(0,4)})</div>\`;
-
-            if (data.type === 'text') content += \`<div>\${data.text}</div>\`;
-            if (data.type === 'image') content += \`<img src="\${data.image}">\`;
-            if (data.type === 'audio') content += \`<audio controls src="\${data.audio}"></audio>\`;
-
-            div.innerHTML = content + \`<div class="meta">\${data.time} ✓</div>\`;
-            document.getElementById('messages').appendChild(div);
-            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+            // Показываем ID только у чужих
+            if(!isMe) content += \`<div class="sender-id">ID: \${msg.userId}</div>\`;
+            
+            if(msg.type === 'text') content += \`<div>\${msg.content}</div>\`;
+            if(msg.type === 'image') content += \`<img src="\${msg.content}">\`;
+            if(msg.type === 'audio') content += \`<audio controls src="\${msg.content}"></audio>\`;
+            
+            div.innerHTML = content + \`<div class="time">\${msg.time}</div>\`;
+            
+            const box = document.getElementById('messages');
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
         }
 
-        // --- УПРАВЛЕНИЕ КОМНАТАМИ ---
-        function toggleSidebar() {
-            document.getElementById('sidebar').classList.toggle('active');
-        }
-
-        function createRoom() {
-            const name = prompt("Название новой комнаты:");
-            if (name) {
-                switchRoom(name);
-                const btn = document.createElement('div');
-                btn.className = 'room-btn';
-                btn.innerText = '# ' + name;
-                btn.onclick = () => switchRoom(name);
-                document.getElementById('rooms-list').appendChild(btn);
+        // --- 4. ОТПРАВКА ---
+        function sendTxt() {
+            const inp = document.getElementById('msg-in');
+            if(inp.value.trim()){
+                socket.emit('send_msg', { type: 'text', content: inp.value, room: currentRoom, userId: myUserId });
+                inp.value = '';
             }
         }
 
-        function switchRoom(room) {
-            currentRoom = room;
-            // Визуальное выделение активной комнаты
+        function sendFile() {
+            const file = document.getElementById('file-in').files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                socket.emit('send_msg', { type: 'image', content: e.target.result, room: currentRoom, userId: myUserId });
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // --- 5. ГОЛОСОВЫЕ ---
+        let mediaRec; let chunks = [];
+        async function recStart() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRec = new MediaRecorder(stream);
+                mediaRec.start();
+                chunks = [];
+                document.getElementById('mic-btn').style.transform = "scale(1.3)";
+                document.getElementById('mic-btn').innerText = "🔴";
+                mediaRec.ondataavailable = e => chunks.push(e.data);
+                mediaRec.onstop = () => {
+                    const blob = new Blob(chunks);
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        socket.emit('send_msg', { type: 'audio', content: e.target.result, room: currentRoom, userId: myUserId });
+                    };
+                    reader.readAsDataURL(blob);
+                    document.getElementById('mic-btn').style.transform = "scale(1)";
+                    document.getElementById('mic-btn').innerText = "🎤";
+                };
+            } catch(e) { alert('Дай доступ к микрофону!'); }
+        }
+        function recStop() { if(mediaRec) mediaRec.stop(); }
+
+        // --- 6. МЕНЮ И КОМНАТЫ ---
+        function toggleMenu() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+        function createRoom() {
+            const name = prompt("Имя комнаты:");
+            if(name) switchRoom(name);
+        }
+        function switchRoom(name) {
+            currentRoom = name;
             document.querySelectorAll('.room-btn').forEach(b => b.classList.remove('active'));
-            event.target.classList.add('active');
-            
-            socket.emit('join_room', room); // Сервер сам пришлет историю после этого
+            // Простое выделение, можно доработать
+            socket.emit('join_room', name);
+            toggleMenu(); // Закрыть меню на мобиле
         }
     </script>
 </body>
@@ -294,4 +239,4 @@ app.get('/', (req, res) => {
     `);
 });
 
-server.listen(process.env.PORT || 3000, () => { console.log('Server running'); });
+server.listen(process.env.PORT || 3000, () => { console.log('Fixed Server OK'); });
