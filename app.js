@@ -47,54 +47,43 @@ app.get('/', (req, res) => {
     <title>G-CHAT ELITE</title>
     <style>
         :root { --bg: #0b0e14; --panel: #161b22; --accent: #7c3aed; --mine: #6d28d9; --text: #e6edf3; }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline:none; }
         body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100dvh; overflow: hidden; position: fixed; width: 100vw; }
 
-        /* AUTH */
-        #auth-screen { position: fixed; inset: 0; background: var(--bg); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-        .auth-card { background: var(--panel); padding: 40px; border-radius: 25px; width: 90%; max-width: 350px; text-align: center; border: 1px solid #333; }
-        .auth-input { width: 100%; background: #000; border: 1px solid #333; color: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; text-align: center; }
-
-        /* SIDEBAR */
         #sidebar { width: 320px; background: var(--panel); border-right: 1px solid #333; display: flex; flex-direction: column; transition: 0.3s; z-index: 1000; }
         .sidebar-header { padding: 20px; background: #0d1117; border-bottom: 1px solid #333; }
         #rooms-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .room-btn { padding: 15px; margin-bottom: 10px; background: rgba(255,255,255,0.02); border-radius: 15px; border: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
-        .room-btn.active { background: var(--accent); }
-        .del-btn { opacity: 0.5; font-size: 18px; padding: 5px; }
+        
+        .room-btn { padding: 15px; margin-bottom: 10px; background: rgba(255,255,255,0.02); border-radius: 15px; border: 1px solid #333; display: flex; justify-content: space-between; align-items: center; cursor:pointer; }
+        .room-btn.active { background: var(--accent); border-color: #a78bfa; }
+        .room-info { flex: 1; }
+        .room-actions { display: flex; gap: 15px; align-items: center; }
+        .edit-btn { color: #8b949e; font-size: 18px; }
+        .del-btn { color: #ff4d4d; font-size: 18px; opacity: 0.6; }
 
-        /* CHAT */
-        #chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg); }
+        #chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg); position: relative; }
         .top-bar { padding: 15px; background: var(--panel); border-bottom: 1px solid #333; display: flex; align-items: center; gap: 15px; }
         #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        
         .msg { max-width: 80%; padding: 12px; border-radius: 18px; position: relative; font-size: 15px; }
         .msg.me { align-self: flex-end; background: var(--mine); }
         .msg.them { align-self: flex-start; background: var(--panel); border: 1px solid #333; }
 
         #input-zone { padding: 10px; background: #0d1117; display: flex; align-items: center; gap: 10px; padding-bottom: max(15px, env(safe-area-inset-bottom)); }
         #msg-in { flex: 1; background: #000; border: 1px solid #333; color: #fff; padding: 12px 18px; border-radius: 25px; }
-        .action-btn { background: var(--accent); border: none; color: white; width: 45px; height: 45px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
-
+        
         @media (max-width: 768px) { #sidebar { position: fixed; left: -100%; height: 100%; width: 85%; } #sidebar.open { left: 0; } }
     </style>
 </head>
 <body>
-    <div id="auth-screen">
-        <div class="auth-card">
-            <h2 style="color:var(--accent)">G-CHAT ELITE</h2>
-            <input type="text" id="auth-name" class="auth-input" placeholder="Твоё имя">
-            <button class="auth-input" style="background:var(--accent); border:none; font-weight:bold;" onclick="login()">НАЧАТЬ</button>
-        </div>
-    </div>
-
     <div id="sidebar">
         <div class="sidebar-header">
             <button style="float:right; background:none; border:none; color:white; font-size:20px;" onclick="togglePrivacy()">👁️</button>
-            <b style="color:var(--accent)">G-CHAT</b>
+            <b style="color:var(--accent)">G-CHAT ELITE</b>
             <div id="my-id-display" style="font-size:12px; opacity:0.6; margin-top:5px;"></div>
         </div>
         <div id="rooms-list"></div>
-        <button onclick="addFriend()" style="margin:15px; padding:15px; background:var(--accent); border:none; color:white; border-radius:12px; font-weight:bold;">+ ДОБАВИТЬ ДРУГА</button>
+        <button onclick="addFriend()" style="margin:15px; padding:15px; background:var(--accent); border:none; color:white; border-radius:12px; font-weight:bold;">+ ДОБАВИТЬ ПО ID</button>
     </div>
 
     <div id="chat-area">
@@ -107,125 +96,110 @@ app.get('/', (req, res) => {
             <label style="font-size:24px;">📎<input type="file" id="file-in" hidden onchange="sendFile()"></label>
             <input type="text" id="msg-in" placeholder="Сообщение...">
             <div id="mic-btn" style="font-size:24px;">🎤</div>
-            <button class="action-btn" onclick="sendTxt()">➤</button>
+            <button style="background:var(--accent); border:none; color:white; width:45px; height:45px; border-radius:50%;" onclick="sendTxt()">➤</button>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let userData = JSON.parse(localStorage.getItem('gchat_user'));
+        let userData = JSON.parse(localStorage.getItem('gchat_user')) || {id: Math.floor(100000 + Math.random()*899999), name: "User"};
+        if(!localStorage.getItem('gchat_user')) localStorage.setItem('gchat_user', JSON.stringify(userData));
+
         let privacyMode = localStorage.getItem('gchat_privacy') === 'true';
         let friends = JSON.parse(localStorage.getItem('gchat_friends') || '[]');
         let currentRoom = localStorage.getItem('gchat_last_room');
 
-        function login() {
-            const n = document.getElementById('auth-name').value;
-            if(!n) return;
-            userData = { id: Math.floor(100000 + Math.random()*899999), name: n };
-            localStorage.setItem('gchat_user', JSON.stringify(userData));
-            location.reload();
-        }
-
-        if(userData) {
-            document.getElementById('auth-screen').style.display = 'none';
-            updateProfile();
-            renderFriends();
-            if(currentRoom) switchRoom(currentRoom);
-        }
-
-        function togglePrivacy() {
-            privacyMode = !privacyMode;
-            localStorage.setItem('gchat_privacy', privacyMode);
-            updateProfile();
-            renderFriends();
-            switchRoom(currentRoom); // Обновить шапку
-        }
-
-        function updateProfile() {
-            document.getElementById('my-id-display').innerText = "Мой ID: " + (privacyMode ? "******" : userData.id);
-        }
+        function updateProfile() { document.getElementById('my-id-display').innerText = "Мой ID: " + (privacyMode ? "******" : userData.id); }
+        function togglePrivacy() { privacyMode = !privacyMode; localStorage.setItem('gchat_privacy', privacyMode); updateProfile(); renderFriends(); }
+        function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
 
         function addFriend() {
-            const fId = prompt("Введите ID друга (6 цифр):");
-            const fName = prompt("Как его назвать?");
+            const fId = prompt("Введите ID друга:");
+            const fName = prompt("Введите имя для этого контакта:");
             if(fId && fName) {
+                saveContact(parseInt(fId), fName);
                 const room = [userData.id, parseInt(fId)].sort().join('-');
-                if(!friends.find(f => f.id == fId)) {
-                    friends.push({ id: parseInt(fId), name: fName, room: room });
-                    localStorage.setItem('gchat_friends', JSON.stringify(friends));
-                }
-                renderFriends();
                 switchRoom(room);
             }
         }
 
+        function saveContact(id, name) {
+            const room = [userData.id, id].sort().join('-');
+            const existing = friends.findIndex(f => f.id === id);
+            if(existing > -1) friends[existing].name = name;
+            else friends.push({ id, name, room });
+            localStorage.setItem('gchat_friends', JSON.stringify(friends));
+            renderFriends();
+        }
+
         function renderFriends() {
-            const list = document.getElementById('rooms-list');
-            list.innerHTML = '';
+            const list = document.getElementById('rooms-list'); list.innerHTML = '';
             friends.forEach(f => {
+                const isUnknown = f.name.includes("Неизвестный");
                 const d = document.createElement('div');
                 d.className = 'room-btn' + (currentRoom === f.room ? ' active' : '');
-                d.innerHTML = \`<div><b>\${f.name}</b><br><small>ID: \${privacyMode ? '******' : f.id}</small></div>
-                               <div class="del-btn" onclick="deleteChat('\${f.room}', event)">🗑️</div>\`;
                 d.onclick = () => switchRoom(f.room);
+                d.innerHTML = \`
+                    <div class="room-info">
+                        <b>\${f.name}</b><br>
+                        <small>ID: \${privacyMode ? '******' : f.id}</small>
+                    </div>
+                    <div class="room-actions">
+                        <span class="edit-btn" onclick="renameContact(\${f.id}, event)">✏️</span>
+                        <span class="del-btn" onclick="deleteChat('\${f.room}', event)">🗑️</span>
+                    </div>\`;
                 list.appendChild(d);
             });
         }
 
+        function renameContact(id, e) {
+            e.stopPropagation();
+            const newName = prompt("Введите новое имя:");
+            if(newName) saveContact(id, newName);
+        }
+
         function deleteChat(room, e) {
             e.stopPropagation();
-            if(confirm("Удалить этот чат из списка?")) {
+            if(confirm("Удалить чат?")) {
                 friends = friends.filter(f => f.room !== room);
                 localStorage.setItem('gchat_friends', JSON.stringify(friends));
                 if(currentRoom === room) currentRoom = null;
-                renderFriends();
                 location.reload();
             }
         }
 
         function switchRoom(room) {
-            if(!room) return;
             currentRoom = room;
             localStorage.setItem('gchat_last_room', room);
             const friend = friends.find(f => f.room === room);
-            document.getElementById('chat-title').innerText = friend ? friend.name : "Чат #" + (privacyMode ? "******" : room);
+            document.getElementById('chat-title').innerText = friend ? friend.name : "Чат";
             socket.emit('join_room', room);
             renderFriends();
-            if(window.innerWidth < 768) toggleMenu();
+            if(window.innerWidth < 768) document.getElementById('sidebar').classList.remove('open');
         }
-
-        function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
-
-        socket.on('load_history', (msgs) => {
-            const box = document.getElementById('messages'); box.innerHTML = '';
-            msgs.forEach(m => renderMsg(m)); box.scrollTop = box.scrollHeight;
-        });
 
         socket.on('new_msg', (msg) => {
             if(msg.room === currentRoom) renderMsg(msg);
-            
-            // Если пришло сообщение от кого-то, кого нет в друзьях
+            // Авто-добавление неизвестного отправителя
             const otherId = msg.userId != userData.id ? msg.userId : null;
             if(otherId && !friends.find(f => f.id == otherId)) {
-                friends.push({ id: otherId, name: "Неизвестный (#" + otherId + ")", room: msg.room });
-                localStorage.setItem('gchat_friends', JSON.stringify(friends));
-                renderFriends();
+                saveContact(otherId, "Неизвестный (#" + otherId + ")");
             }
         });
 
-        socket.on('msg_deleted', (id) => { document.getElementById('msg-'+id)?.remove(); });
+        // ... остальной код рендера сообщений и отправки (такой же как в прошлой версии) ...
+        socket.on('load_history', (msgs) => { 
+            const box = document.getElementById('messages'); box.innerHTML = ''; 
+            msgs.forEach(m => renderMsg(m)); box.scrollTop = box.scrollHeight; 
+        });
 
         function renderMsg(msg) {
             const d = document.createElement('div');
             d.id = 'msg-' + msg.id;
             d.className = 'msg ' + (msg.userId == userData.id ? 'me' : 'them');
-            let content = "";
-            if(msg.type === 'text') content = msg.content;
-            else if(msg.type === 'image') content = \`<img src="\${msg.content}" width="100%" style="border-radius:10px;">\`;
-            else content = \`<audio controls src="\${msg.content}" style="width:100%; filter:invert(1)"></audio>\`;
-            
-            d.innerHTML = \`<div style="font-size:10px; opacity:0.5">\${msg.userName}</div>\${content}<div style="font-size:8px; opacity:0.3; text-align:right">\${msg.time}</div>\`;
+            let c = msg.type === 'text' ? msg.content : (msg.type === 'image' ? \`<img src="\${msg.content}" width="100%" style="border-radius:10px;">\` : \`<audio controls src="\${msg.content}" style="width:100%; filter:invert(1)"></audio>\`);
+            d.innerHTML = \`<div style="font-size:10px; opacity:0.5">\${msg.userName}</div>\${c}<div style="font-size:8px; opacity:0.3; text-align:right">\${msg.time}</div>\`;
             d.onclick = () => { if(msg.userId == userData.id && confirm("Удалить?")) socket.emit('delete_msg', {id: msg.id, room: currentRoom}); };
             document.getElementById('messages').appendChild(d);
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
@@ -238,7 +212,6 @@ app.get('/', (req, res) => {
                 i.value = '';
             }
         }
-        
         function sendFile() {
             const f = document.getElementById('file-in').files[0];
             if(f && currentRoom) {
@@ -247,15 +220,11 @@ app.get('/', (req, res) => {
                 r.readAsDataURL(f);
             }
         }
-
-        // Голосовые
         let mediaRec; let chunks = [];
         const mic = document.getElementById('mic-btn');
         async function startR(e) {
-            e.preventDefault();
-            const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRec = new MediaRecorder(s); mediaRec.start(); chunks = [];
-            mic.style.color = "red";
+            e.preventDefault(); const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRec = new MediaRecorder(s); mediaRec.start(); chunks = []; mic.style.color = "red";
             mediaRec.ondataavailable = ev => chunks.push(ev.data);
             mediaRec.onstop = () => {
                 const b = new Blob(chunks, { type: 'audio/mp4' });
@@ -266,6 +235,9 @@ app.get('/', (req, res) => {
         }
         mic.addEventListener('touchstart', startR); mic.addEventListener('touchend', () => mediaRec.stop());
         mic.addEventListener('mousedown', startR); mic.addEventListener('mouseup', () => mediaRec.stop());
+        
+        updateProfile();
+        renderFriends();
     </script>
 </body>
 </html>
