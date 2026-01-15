@@ -130,3 +130,4 @@ io.on('connection', (socket) => {
     socket.on('chat message', (data) => io.to(data.room).emit('chat message', data));
 });
 server.listen(process.env.PORT || 3000);
+
