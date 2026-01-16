@@ -8,33 +8,17 @@ const io = new Server(server, { maxHttpBufferSize: 1e8 });
 let messageHistory = [];
 
 io.on('connection', (socket) => {
-    socket.on('register_me', (data) => { 
-        socket.myId = data.id;
-        socket.join("user-" + data.id); 
-        io.emit('user_status', {id: data.id, online: true}); 
-    });
-
+    socket.on('register_me', (id) => { socket.myId = id; socket.join("user-" + id); });
     socket.on('join_room', (room) => { 
         socket.join(room); 
         socket.emit('load_history', messageHistory.filter(m => m.room === room)); 
     });
-
-    socket.on('typing', (data) => {
-        socket.to(data.room).emit('is_typing', { userId: socket.myId, userName: data.userName, typing: data.typing });
-    });
-
     socket.on('send_msg', (data) => {
         const msg = { id: Date.now() + Math.random(), ...data };
         messageHistory.push(msg);
         if (messageHistory.length > 500) messageHistory.shift(); 
         io.to(data.room).emit('new_msg', msg);
     });
-
-    socket.on('invite_to_group', (data) => {
-        io.to("user-" + data.toId).emit('group_invite', { room: data.room, name: data.groupName, adminId: socket.myId });
-    });
-
-    socket.on('disconnect', () => { if(socket.myId) io.emit('user_status', {id: socket.myId, online: false}); });
 });
 
 app.get('/', (req, res) => {
@@ -43,185 +27,212 @@ app.get('/', (req, res) => {
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>G-CHAT (No Delete Mode)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>G-CHAT PREMIUM</title>
     <style>
-        :root { --bg: #0b0e14; --panel: #161b22; --accent: #7c3aed; --text: #e6edf3; }
-        * { box-sizing: border-box; outline:none; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100dvh; overflow: hidden; }
-        #sidebar { width: 300px; background: var(--panel); border-right: 1px solid #333; display: flex; flex-direction: column; z-index: 1000; transition: 0.3s; }
-        .sidebar-header { padding: 20px; background: #0d1117; border-bottom: 2px solid var(--accent); }
-        #rooms-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .room-btn { padding: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid #333; cursor:pointer; }
-        .room-btn.active { border-color: var(--accent); background: rgba(124, 58, 237, 0.1); }
-        #chat-area { flex: 1; display: flex; flex-direction: column; }
-        .top-bar { padding: 10px 15px; background: var(--panel); border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: space-between; }
-        #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .msg { max-width: 85%; padding: 10px; border-radius: 12px; font-size: 14px; position: relative; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .msg.me { align-self: flex-end; background: var(--accent); }
-        .msg.them { align-self: flex-start; background: #21262d; }
-        .msg-info { font-size: 10px; font-weight: bold; margin-bottom: 4px; color: #aaa; display: flex; justify-content: space-between; }
-        .me .msg-info { color: #ddd; }
-        #input-zone { padding: 10px; background: #0d1117; display: flex; align-items: center; gap: 8px; }
-        #msg-in { flex: 1; background: #000; border: 1px solid #444; color: #fff; padding: 12px; border-radius: 20px; }
-        .btn-ui { background: var(--accent); border: none; color: white; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        #typing-monitor { font-size: 11px; color: var(--accent); height: 15px; margin-left: 15px; margin-bottom: 5px; opacity: 0; }
+        :root { --bg: #090b10; --panel: #12151c; --accent: #8b5cf6; --text: #f3f4f6; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100dvh; overflow: hidden; }
+        
+        /* Sidebar */
+        #sidebar { width: 300px; background: var(--panel); border-right: 1px solid #2d343f; display: flex; flex-direction: column; transition: 0.3s; z-index: 1000; }
+        .sidebar-header { padding: 25px 20px; border-bottom: 1px solid #2d343f; }
+        #rooms-list { flex: 1; overflow-y: auto; padding: 15px; }
+        .room-btn { padding: 15px; margin-bottom: 10px; background: #1a1f29; border-radius: 12px; cursor: pointer; border: 1px solid transparent; transition: 0.2s; }
+        .room-btn.active { border-color: var(--accent); background: rgba(139, 92, 246, 0.1); }
+
+        /* Main Chat */
+        #chat-area { flex: 1; display: flex; flex-direction: column; position: relative; }
+        .top-bar { padding: 15px 20px; background: var(--panel); border-bottom: 1px solid #2d343f; display: flex; align-items: center; justify-content: space-between; }
+        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        
+        .msg { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 15px; line-height: 1.4; position: relative; animation: fadeIn 0.2s ease; }
+        .msg.me { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 4px; }
+        .msg.them { align-self: flex-start; background: #1e2532; border-bottom-left-radius: 4px; }
+        .msg-meta { font-size: 10px; opacity: 0.6; margin-bottom: 4px; display: flex; gap: 8px; }
+
+        /* Input Area */
+        #input-zone { padding: 15px; background: var(--panel); display: flex; align-items: center; gap: 12px; padding-bottom: calc(15px + env(safe-area-inset-bottom)); }
+        #msg-in { flex: 1; background: #000; border: none; color: #fff; padding: 12px 18px; border-radius: 25px; font-size: 15px; }
+        .icon-btn { font-size: 22px; cursor: pointer; filter: grayscale(0.5); transition: 0.2s; }
+        .icon-btn:hover { filter: grayscale(0); transform: scale(1.1); }
+        .rec-active { color: #ff4444 !important; filter: grayscale(0); animation: pulse 1s infinite; }
+
+        /* Custom Modal UI */
+        #modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 2000; backdrop-filter: blur(5px); }
+        .modal { background: var(--panel); padding: 25px; border-radius: 20px; width: 90%; max-width: 350px; border: 1px solid #333; }
+        .modal input { width: 100%; background: #000; border: 1px solid #444; color: #fff; padding: 12px; border-radius: 10px; margin: 15px 0; }
+        .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
         @media (max-width: 768px) { #sidebar { position: fixed; left: -100%; width: 85%; height: 100%; } #sidebar.open { left: 0; } }
     </style>
 </head>
 <body>
+
+    <div id="modal-overlay">
+        <div class="modal">
+            <h3 id="modal-title" style="margin:0">Ввод данных</h3>
+            <input type="text" id="modal-input">
+            <div class="modal-btns">
+                <button onclick="closeModal()" style="background:none; border:none; color:#aaa; cursor:pointer;">Отмена</button>
+                <button id="modal-confirm" style="background:var(--accent); border:none; color:white; padding:8px 20px; border-radius:8px; cursor:pointer;">ОК</button>
+            </div>
+        </div>
+    </div>
+
     <div id="sidebar">
         <div class="sidebar-header">
-            <div onclick="changeMyName()" style="cursor:pointer;"><b id="display-name" style="font-size:18px;">Я</b> ✏️</div>
-            <div id="display-id" style="font-size:14px; color:var(--accent); font-weight:bold; margin-top:5px;">ID: ...</div>
+            <div onclick="askName()" style="cursor:pointer; font-size:20px;"><b id="user-name">Загрузка...</b> ✏️</div>
+            <div id="user-id" style="font-size:12px; color:var(--accent); margin-top:5px;">ID: ...</div>
         </div>
         <div id="rooms-list"></div>
-        <button class="btn-ui" style="margin: 10px;" onclick="createGroup()">+ СОЗДАТЬ ГРУППУ</button>
-        <button class="btn-ui" style="margin: 0 10px 10px 10px; background:#333;" onclick="addFriend()">+ ЛИЧНЫЙ ЧАТ (ID)</button>
+        <div style="padding:15px; display:flex; flex-direction:column; gap:10px;">
+            <button onclick="askGroup()" style="background:var(--accent); border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; cursor:pointer;">+ Создать группу</button>
+            <button onclick="askFriend()" style="background:#2d343f; border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; cursor:pointer;">+ Личный чат</button>
+        </div>
     </div>
+
     <div id="chat-area">
         <div class="top-bar">
-            <div style="display:flex; align-items:center; gap:10px;"><button class="btn-ui" onclick="toggleMenu()">☰</button><b id="chat-title">Выберите чат</b></div>
-            <button id="add-to-group-btn" class="btn-ui" style="display:none;" onclick="inviteToGroup()">+</button>
+            <button onclick="toggleMenu()" style="background:none; border:none; color:white; font-size:24px;">☰</button>
+            <b id="chat-title">Выберите чат</b>
+            <div style="width:24px;"></div>
         </div>
         <div id="messages"></div>
-        <div id="typing-monitor"></div>
         <div id="input-zone">
-            <label style="cursor:pointer; font-size:20px;">📎<input type="file" id="file-input" hidden onchange="uploadFile()"></label>
-            <input type="text" id="msg-in" placeholder="Сообщение..." oninput="handleTyping()">
-            <button class="btn-ui" onclick="sendTxt()">➤</button>
+            <span class="icon-btn" onclick="document.getElementById('file-in').click()">📎</span>
+            <input type="file" id="file-in" hidden onchange="uploadFile()">
+            <input type="text" id="msg-in" placeholder="Сообщение...">
+            <span id="mic-btn" class="icon-btn" onclick="toggleVoice()">🎤</span>
+            <span class="icon-btn" onclick="sendText()" style="color:var(--accent)">➤</span>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let userData = JSON.parse(localStorage.getItem('gchat_user')) || {id: Math.floor(1000 + Math.random()*8999), name: "Пользователь"};
-        localStorage.setItem('gchat_user', JSON.stringify(userData));
-        let chats = JSON.parse(localStorage.getItem('gchat_list') || '[]');
+        let userData = JSON.parse(localStorage.getItem('gchat_v4')) || {id: Math.floor(1000+Math.random()*8999), name: "Пользователь"};
+        localStorage.setItem('gchat_v4', JSON.stringify(userData));
+        let chats = JSON.parse(localStorage.getItem('gchat_rooms') || '[]');
         let currentRoom = null;
-        let typingTimeout;
+        let mediaRecorder;
+        let audioChunks = [];
 
-        socket.emit('register_me', {id: userData.id});
-        function updateProfileUI() { document.getElementById('display-name').innerText = userData.name; document.getElementById('display-id').innerText = "МОЙ ID: " + userData.id; }
-        updateProfileUI();
-
-        function handleTyping() {
-            socket.emit('typing', { room: currentRoom, userName: userData.name, typing: true });
-            clearTimeout(typingTimeout);
-            typingTimeout = setTimeout(() => { socket.emit('typing', { room: currentRoom, typing: false }); }, 2000);
-        }
-
-        socket.on('is_typing', (data) => {
-            const monitor = document.getElementById('typing-monitor');
-            if(data.typing) { monitor.innerText = data.userName + " печатает..."; monitor.style.opacity = 1; }
-            else { monitor.style.opacity = 0; }
-        });
-
-        function uploadFile() {
-            const file = document.getElementById('file-input').files[0];
-            if(!file) return;
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const data = { room: currentRoom, userId: userData.id, userName: userData.name, type: 'file', content: e.target.result, fileName: file.name, time: new Date().toLocaleTimeString().slice(0,5) };
-                socket.emit('send_msg', data);
+        socket.emit('register_me', userData.id);
+        
+        // Красивое модальное окно вместо prompt
+        function showModal(title, callback) {
+            document.getElementById('modal-overlay').style.display = 'flex';
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-input').value = '';
+            document.getElementById('modal-input').focus();
+            document.getElementById('modal-confirm').onclick = () => {
+                const val = document.getElementById('modal-input').value;
+                if(val) callback(val);
+                closeModal();
             };
-            reader.readAsDataURL(file);
         }
+        function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
 
-        function renderMsg(msg) {
-            if(document.getElementById('m-'+msg.id)) return;
-            const box = document.getElementById('messages');
-            const d = document.createElement('div');
-            d.id = 'm-' + msg.id;
-            d.className = 'msg ' + (msg.userId == userData.id ? 'me' : 'them');
-            let body = msg.content;
-            if(msg.type === 'file') {
-                body = \`<a href="\${msg.content}" download="\${msg.fileName}" style="color:white; text-decoration:underline;">📄 \${msg.fileName}</a>\`;
-            }
-            d.innerHTML = \`<div class="msg-info"><span>\${msg.userName}</span><span>ID: \${msg.userId}</span></div>\${body}\`;
-            box.appendChild(d);
-        }
-
-        function sendTxt() {
-            const i = document.getElementById('msg-in');
-            if(i.value && currentRoom) {
-                socket.emit('send_msg', { room: currentRoom, userId: userData.id, userName: userData.name, type:'text', content: i.value, time: new Date().toLocaleTimeString().slice(0,5) });
-                i.value = '';
-                socket.emit('typing', { room: currentRoom, typing: false });
-            }
-        }
-
-        socket.on('new_msg', (msg) => {
-            let hist = JSON.parse(localStorage.getItem('hist_' + msg.room) || '[]');
-            hist.push(msg); if(hist.length > 300) hist.shift();
-            localStorage.setItem('hist_' + msg.room, JSON.stringify(hist));
-            if(msg.room === currentRoom) { renderMsg(msg); scrollToBottom(); }
-        });
-
-        function switchRoom(room) {
-            currentRoom = room;
-            const c = chats.find(c => c.room === room);
-            document.getElementById('chat-title').innerText = c ? c.name : "Чат";
-            document.getElementById('messages').innerHTML = '';
-            document.getElementById('add-to-group-btn').style.display = (c && c.type === 'group' && c.admin === userData.id) ? 'block' : 'none';
-            const hist = JSON.parse(localStorage.getItem('hist_' + room) || '[]');
-            hist.forEach(m => renderMsg(m));
-            socket.emit('join_room', room);
-            renderChats();
-            if(window.innerWidth < 768) toggleMenu();
-            scrollToBottom();
-        }
-
-        function createGroup() {
-            const name = prompt("Название группы:"); if(!name) return;
-            const room = "group-" + Math.random().toString(36).substr(2, 9);
-            chats.push({name, room, type: 'group', admin: userData.id});
-            localStorage.setItem('gchat_list', JSON.stringify(chats));
-            switchRoom(room);
-        }
-
-        function addFriend() {
-            const id = prompt("ID друга:"); if(!id) return;
+        function askName() { showModal("Ваше имя:", (n) => { userData.name = n; save(); updateUI(); }); }
+        function askGroup() { showModal("Название группы:", (n) => {
+            const room = "grp-" + Date.now();
+            chats.push({name: n, room, type:'group'}); save(); switchRoom(room);
+        }); }
+        function askFriend() { showModal("ID друга:", (id) => {
             const room = [userData.id, parseInt(id)].sort().join('-');
-            if(!chats.find(c => c.room === room)) { 
-                chats.push({id: parseInt(id), name: "Чат с ID " + id, room, type: 'private'}); 
-                localStorage.setItem('gchat_list', JSON.stringify(chats)); 
-            }
-            switchRoom(room);
+            chats.push({name: "Чат " + id, room, type:'private'}); save(); switchRoom(room);
+        }); }
+
+        function save() { 
+            localStorage.setItem('gchat_v4', JSON.stringify(userData));
+            localStorage.setItem('gchat_rooms', JSON.stringify(chats));
         }
 
-        function inviteToGroup() {
-            const id = prompt("ID друга для добавления:");
-            const c = chats.find(c => c.room === currentRoom);
-            if(id && c) socket.emit('invite_to_group', { toId: parseInt(id), room: c.room, groupName: c.name });
-        }
-
-        socket.on('group_invite', (data) => {
-            if(!chats.find(c => c.room === data.room)) {
-                if(confirm("Приглашение в группу " + data.name + " (Админ ID: " + data.adminId + ")")) {
-                    chats.push({name: data.name, room: data.room, type: 'group', admin: data.adminId});
-                    localStorage.setItem('gchat_list', JSON.stringify(chats));
-                    renderChats();
-                }
-            }
-        });
-
-        function renderChats() {
+        function updateUI() {
+            document.getElementById('user-name').innerText = userData.name;
+            document.getElementById('user-id').innerText = "МОЙ ID: " + userData.id;
             const list = document.getElementById('rooms-list'); list.innerHTML = '';
             chats.forEach(c => {
-                const d = document.createElement('div'); d.className = 'room-btn' + (currentRoom === c.room ? ' active' : '');
+                const d = document.createElement('div');
+                d.className = 'room-btn' + (currentRoom === c.room ? ' active' : '');
                 d.onclick = () => switchRoom(c.room);
                 d.innerHTML = \`<b>\${c.name}</b><br><small>\${c.type==='group'?'Группа':'Личный'}</small>\`;
                 list.appendChild(d);
             });
         }
 
-        function changeMyName() { const n = prompt("Имя:", userData.name); if(n) { userData.name = n; localStorage.setItem('gchat_user', JSON.stringify(userData)); updateProfileUI(); }}
+        function switchRoom(room) {
+            currentRoom = room;
+            const c = chats.find(ch => ch.room === room);
+            document.getElementById('chat-title').innerText = c ? c.name : "Чат";
+            document.getElementById('messages').innerHTML = '';
+            socket.emit('join_room', room);
+            updateUI();
+            if(window.innerWidth < 768) toggleMenu();
+        }
+
+        function sendText() {
+            const i = document.getElementById('msg-in');
+            if(i.value && currentRoom) {
+                socket.emit('send_msg', { room: currentRoom, userId: userData.id, userName: userData.name, type: 'text', content: i.value });
+                i.value = '';
+            }
+        }
+
+        async function toggleVoice() {
+            if (!mediaRecorder || mediaRecorder.state === "inactive") {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        socket.emit('send_msg', { room: currentRoom, userId: userData.id, userName: userData.name, type: 'voice', content: reader.result });
+                    };
+                    reader.readAsDataURL(blob);
+                    document.getElementById('mic-btn').classList.remove('rec-active');
+                };
+                mediaRecorder.start();
+                document.getElementById('mic-btn').classList.add('rec-active');
+            } else {
+                mediaRecorder.stop();
+            }
+        }
+
+        function uploadFile() {
+            const file = document.getElementById('file-in').files[0];
+            const reader = new FileReader();
+            reader.onload = () => {
+                socket.emit('send_msg', { room: currentRoom, userId: userData.id, userName: userData.name, type: 'file', content: reader.result, fileName: file.name });
+            };
+            reader.readAsDataURL(file);
+        }
+
+        socket.on('new_msg', m => {
+            if(m.room === currentRoom) {
+                const box = document.getElementById('messages');
+                const d = document.createElement('div');
+                d.className = 'msg ' + (m.userId == userData.id ? 'me' : 'them');
+                let content = m.content;
+                if(m.type === 'voice') content = \`<audio src="\${m.content}" controls style="width:200px; height:30px;"></audio>\`;
+                if(m.type === 'file') content = \`<a href="\${m.content}" download="\${m.fileName}" style="color:white">📄 \${m.fileName}</a>\`;
+                d.innerHTML = \`<div class="msg-meta"><span>\${m.userName}</span><span>ID: \${m.userId}</span></div>\${content}\`;
+                box.appendChild(d);
+                box.scrollTop = box.scrollHeight;
+            }
+        });
+
+        socket.on('load_history', msgs => msgs.forEach(m => {
+             // рендер истории по аналогии с new_msg
+        }));
+
         function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
-        function scrollToBottom() { const b = document.getElementById('messages'); b.scrollTop = b.scrollHeight; }
-        socket.on('load_history', (msgs) => { msgs.forEach(m => renderMsg(m)); scrollToBottom(); });
-        renderChats();
+        updateUI();
     </script>
 </body>
 </html>
