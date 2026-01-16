@@ -51,18 +51,17 @@ app.get('/', (req, res) => {
     <style>
         :root { --bg: #0b0e14; --panel: #151921; --accent: #7c3aed; --text: #ffffff; --danger: #ef4444; }
         * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100dvh; display: flex; overflow: hidden; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100dvh; display: flex; overflow: hidden; }
         
         #auth-screen, .modal-overlay { position: fixed; inset: 0; background: rgba(7, 8, 12, 0.95); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px); padding: 20px; }
-        .glass-box { background: var(--panel); padding: 30px; border-radius: 24px; width: 100%; max-width: 320px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 20px 40px rgba(0,0,0,0.6); text-align: center; }
-        h2 { color: var(--accent); margin-bottom: 25px; font-size: 28px; letter-spacing: 2px; }
-        input { width: 100%; background: #000; border: 1px solid #333; color: #fff; padding: 14px; border-radius: 14px; margin-bottom: 12px; font-size: 15px; }
+        .glass-box { background: var(--panel); padding: 30px; border-radius: 24px; width: 100%; max-width: 320px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+        input { width: 100%; background: #000; border: 1px solid #333; color: #fff; padding: 14px; border-radius: 14px; margin-bottom: 12px; }
 
         #sidebar { width: 260px; background: var(--panel); border-right: 1px solid #1e293b; display: flex; flex-direction: column; transition: 0.3s; z-index: 1000; }
-        .sidebar-header { padding: 20px; border-bottom: 1px solid rgba(124, 58, 237, 0.3); }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--accent); }
         #rooms-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .room-btn { padding: 15px; margin-bottom: 10px; background: rgba(255,255,255,0.03); border-radius: 16px; cursor: pointer; }
-        .room-btn.active { background: rgba(124, 58, 237, 0.2); border: 1px solid var(--accent); }
+        .room-btn { padding: 15px; margin-bottom: 10px; background: rgba(255,255,255,0.03); border-radius: 16px; cursor: pointer; border: 1px solid transparent; }
+        .room-btn.active { background: rgba(124, 58, 237, 0.2); border-color: var(--accent); }
 
         #chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #07080c; }
         .top-bar { height: 65px; padding: 0 20px; background: var(--panel); border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; }
@@ -73,9 +72,11 @@ app.get('/', (req, res) => {
         .msg.them { align-self: flex-start; background: #1e293b; border-bottom-left-radius: 4px; }
         .del-btn { color: var(--danger); cursor: pointer; margin-left: 8px; font-weight: bold; }
 
-        #input-zone { padding: 15px; background: var(--panel); display: flex; gap: 12px; border-top: 1px solid #1e293b; }
-        #msg-in { flex: 1; margin-bottom: 0; border-radius: 30px; }
-        .btn { background: var(--accent); border: none; color: white; padding: 12px 22px; border-radius: 14px; font-weight: bold; cursor: pointer; }
+        #input-zone { padding: 15px; background: var(--panel); display: flex; gap: 12px; align-items: center; border-top: 1px solid #1e293b; }
+        #msg-in { flex: 1; border-radius: 30px; height: 42px; padding: 0 15px; background: #000; border: 1px solid #333; color: #fff; }
+        .btn { background: var(--accent); border: none; color: white; padding: 10px 18px; border-radius: 14px; font-weight: bold; cursor: pointer; }
+        .icon-btn { font-size: 22px; cursor: pointer; color: #888; }
+        .rec-active { display: none; background: #000; padding: 5px 15px; border-radius: 20px; gap: 15px; color: #fff; }
 
         @media (max-width: 768px) { #sidebar { position: fixed; left: -260px; height: 100%; } #sidebar.open { left: 0; } }
     </style>
@@ -84,10 +85,10 @@ app.get('/', (req, res) => {
 
     <div id="auth-screen">
         <div class="glass-box">
-            <h2>G-CHAT</h2>
+            <h2 style="color:var(--accent); margin-bottom:20px;">G-CHAT</h2>
             <input type="text" id="a-name" placeholder="Логин">
             <input type="password" id="a-pass" placeholder="Пароль">
-            <button onclick="auth('login')" class="btn" style="width:100%; margin-bottom:12px;">ВОЙТИ</button>
+            <button onclick="auth('login')" class="btn" style="width:100%; margin-bottom:10px;">ВОЙТИ</button>
             <button onclick="auth('reg')" class="btn" style="width:100%; background:#222;">РЕГИСТРАЦИЯ</button>
         </div>
     </div>
@@ -96,7 +97,7 @@ app.get('/', (req, res) => {
         <div class="glass-box">
             <b id="m-title" style="display:block; margin-bottom:15px;"></b>
             <input type="text" id="m-i1" placeholder="Имя">
-            <input type="text" id="m-i2" placeholder="ID (для ЛС)" style="display:none;">
+            <input type="text" id="m-i2" placeholder="ID друга" style="display:none;">
             <div style="display:flex; gap:10px; justify-content:center;">
                 <button onclick="closeM()" class="btn" style="background:#333;">Отмена</button>
                 <button id="m-ok" class="btn">ОК</button>
@@ -107,7 +108,7 @@ app.get('/', (req, res) => {
     <div id="sidebar">
         <div class="sidebar-header">
             <b id="u-name">...</b><br>
-            <span id="u-id" style="color:var(--accent); font-size:12px;"></span>
+            <span id="u-id" style="color:var(--accent); font-size:12px; font-weight:bold;"></span>
         </div>
         <div id="rooms-list"></div>
         <div style="padding:15px; display:flex; gap:8px;">
@@ -124,7 +125,14 @@ app.get('/', (req, res) => {
         </div>
         <div id="messages"></div>
         <div id="input-zone">
+            <span class="icon-btn" onclick="document.getElementById('file-in').click()">📎</span>
+            <input type="file" id="file-in" hidden onchange="upFile()">
             <input type="text" id="msg-in" placeholder="Сообщение..." autocomplete="off">
+            <div id="rec-ui" class="rec-active">
+                <span onclick="stopRec(true)" style="color:var(--danger)">🗑️</span>
+                <span onclick="stopRec(false)" style="color:#22c55e">🛑 Отправить</span>
+            </div>
+            <span id="mic-btn" class="icon-btn" onclick="startRec()">🎤</span>
             <button onclick="send()" class="btn">➤</button>
         </div>
     </div>
@@ -132,26 +140,27 @@ app.get('/', (req, res) => {
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let user = JSON.parse(localStorage.getItem('g_u_v6'));
-        let chats = JSON.parse(localStorage.getItem('g_c_v6')) || [];
+        let user = JSON.parse(localStorage.getItem('g_u_final'));
+        let chats = JSON.parse(localStorage.getItem('g_c_final')) || [];
         let curRoom = null;
+        let recorder, chunks = [];
 
         function auth(t) {
             const n = document.getElementById('a-name').value.trim();
             const p = document.getElementById('a-pass').value.trim();
             if(!n || !p) return;
-            let db = JSON.parse(localStorage.getItem('G_ACC_DB')) || {};
+            let db = JSON.parse(localStorage.getItem('G_DB_VFINAL')) || {};
             if(t === 'reg') {
                 if(db[n]) return alert("Занято");
                 db[n] = { name:n, pass:p, id: Math.floor(1000+Math.random()*8999) };
-                localStorage.setItem('G_ACC_DB', JSON.stringify(db));
-                alert("Создано!");
+                localStorage.setItem('G_DB_VFINAL', JSON.stringify(db));
+                alert("Аккаунт создан!");
             } else {
                 if(db[n] && db[n].pass === p) {
                     user = db[n];
-                    localStorage.setItem('g_u_v6', JSON.stringify(user));
+                    localStorage.setItem('g_u_final', JSON.stringify(user));
                     location.reload();
-                } else alert("Ошибка");
+                } else alert("Ошибка входа!");
             }
         }
 
@@ -181,7 +190,7 @@ app.get('/', (req, res) => {
             };
         }
         function closeM() { document.getElementById('modal-overlay').style.display='none'; }
-        function save(r) { localStorage.setItem('g_c_v6', JSON.stringify(chats)); switchR(r); }
+        function save(r) { localStorage.setItem('g_c_final', JSON.stringify(chats)); switchR(r); }
 
         function switchR(r) {
             curRoom = r;
@@ -192,7 +201,7 @@ app.get('/', (req, res) => {
             if(c && c.type==='group' && c.admin===user.id) {
                 ab.style.display='block';
                 ab.onclick = () => {
-                    const id = prompt("ID?");
+                    const id = prompt("ID друга?");
                     if(id) socket.emit('invite_to_group', {toId:parseInt(id), room:c.room, groupName:c.name});
                 };
             } else ab.style.display='none';
@@ -220,23 +229,65 @@ app.get('/', (req, res) => {
             const i = document.getElementById('msg-in');
             const c = chats.find(x=>x.room===curRoom);
             if(i.value && curRoom) {
-                const d = { room:curRoom, userId:user.id, userName:user.name, content:i.value };
+                const d = { room:curRoom, userId:user.id, userName:user.name, content:i.value, type:'text' };
                 if(c.type==='private') { d.isPrivate=true; d.toId=c.tid; }
                 socket.emit('send_msg', d);
                 i.value = '';
             }
         }
 
+        async function startRec() {
+            const s = await navigator.mediaDevices.getUserMedia({audio:true});
+            recorder = new MediaRecorder(s);
+            chunks = [];
+            document.getElementById('rec-ui').style.display='flex';
+            document.getElementById('mic-btn').style.display='none';
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => {
+                if(chunks.length > 0) {
+                    const blob = new Blob(chunks, {type:'audio/ogg'});
+                    const r = new FileReader();
+                    r.onload = () => {
+                        const c = chats.find(x=>x.room===curRoom);
+                        const d = {room:curRoom, userId:user.id, userName:user.name, content:r.result, type:'voice'};
+                        if(c && c.type==='private') { d.isPrivate=true; d.toId=c.tid; }
+                        socket.emit('send_msg', d);
+                    };
+                    r.readAsDataURL(blob);
+                }
+                document.getElementById('rec-ui').style.display='none';
+                document.getElementById('mic-btn').style.display='flex';
+            };
+            recorder.start();
+        }
+        function stopRec(cancel) { if(cancel) chunks = []; recorder.stop(); }
+
+        function upFile() {
+            const f = document.getElementById('file-in').files[0];
+            const r = new FileReader();
+            r.onload = () => {
+                const c = chats.find(x=>x.room===curRoom);
+                const d = {room:curRoom, userId:user.id, userName:user.name, content:r.result, type:'file', fileName:f.name};
+                if(c && c.type==='private') { d.isPrivate=true; d.toId=c.tid; }
+                socket.emit('send_msg', d);
+            };
+            r.readAsDataURL(f);
+        }
+
         socket.on('new_msg', m => { if(m.room===curRoom) render(m); });
         socket.on('load_history', h => h.forEach(render));
+
         function render(m) {
             if(document.getElementById('m-'+m.id)) return;
             const b = document.getElementById('messages');
             const d = document.createElement('div');
             d.className = 'msg ' + (m.userId==user.id?'me':'them');
             d.id = 'm-'+m.id;
+            let html = m.content;
+            if(m.type==='voice') html = '<audio src="'+m.content+'" controls style="width:200px; height:35px;"></audio>';
+            if(m.type==='file') html = '<a href="'+m.content+'" download="'+m.fileName+'" style="color:#fff">📄 '+m.fileName+'</a>';
             const del = m.userId==user.id ? '<span class="del-btn" onclick="delM(\\''+m.id+'\\')">✕</span>' : '';
-            d.innerHTML = '<div style="font-size:10px; opacity:0.6"><b>'+m.userName+'</b>'+del+'</div>' + m.content;
+            d.innerHTML = '<div style="font-size:10px; opacity:0.6"><b>'+m.userName+'</b>'+del+'</div>' + html;
             b.appendChild(d);
             b.scrollTop = b.scrollHeight;
         }
@@ -247,16 +298,16 @@ app.get('/', (req, res) => {
             const r = [user.id, d.fromId].sort().join('_');
             if(!chats.find(x=>x.room===r)) {
                 chats.push({name:d.fromName, room:r, type:'private', tid:d.fromId});
-                localStorage.setItem('g_c_v6', JSON.stringify(chats));
+                localStorage.setItem('g_c_final', JSON.stringify(chats));
                 upd();
             }
         });
 
         socket.on('group_invite', d => {
             if(!chats.find(x=>x.room===d.room)) {
-                if(confirm("В группу "+d.name+"?")) {
+                if(confirm("Приглашение в группу "+d.name)) {
                     chats.push({name:d.name, room:d.room, type:'group', admin:d.adminId});
-                    localStorage.setItem('g_c_v6', JSON.stringify(chats));
+                    localStorage.setItem('g_c_final', JSON.stringify(chats));
                     upd();
                 }
             }
