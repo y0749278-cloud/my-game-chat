@@ -18,7 +18,6 @@ io.on('connection', (socket) => {
         serverHistory.push(msg);
         io.to(data.room).emit('new_msg', msg);
     });
-    // Удаление сообщения для всех
     socket.on('delete_msg', (data) => {
         serverHistory = serverHistory.filter(m => m.id !== data.id);
         io.to(data.room).emit('msg_deleted', data.id);
@@ -47,29 +46,29 @@ app.get('/', (req, res) => {
         #sidebar { width: 220px; background: var(--panel); border-right: 1px solid #1e293b; display: flex; flex-direction: column; transition: 0.2s; z-index: 1000; }
         .sidebar-header { padding: 12px; border-bottom: 1px solid var(--accent); }
         #rooms-list { flex: 1; overflow-y: auto; padding: 5px; }
-        .room-btn { padding: 8px 12px; margin-bottom: 3px; background: #161b22; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+        .room-btn { padding: 8px 12px; margin-bottom: 3px; background: #161b22; border-radius: 6px; cursor: pointer; border: 1px solid transparent; font-size: 12px; }
         .room-btn.active { border-color: var(--accent); background: rgba(109, 40, 217, 0.2); }
 
         #chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
         .top-bar { height: 40px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; }
         #messages { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; background: #07080c; }
         
-        .msg { max-width: 88%; padding: 6px 10px; border-radius: 10px; font-size: 12.5px; position: relative; }
+        .msg { max-width: 88%; padding: 6px 10px; border-radius: 10px; font-size: 12.5px; position: relative; word-wrap: break-word; }
         .msg.me { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 2px; }
         .msg.them { align-self: flex-start; background: #1e293b; border-bottom-left-radius: 2px; }
-        .msg-meta { font-size: 8px; opacity: 0.5; margin-bottom: 2px; display: flex; justify-content: space-between; gap: 8px; }
-        .del-msg { color: var(--danger); cursor: pointer; margin-left: 10px; font-weight: bold; }
+        .msg-meta { font-size: 8px; opacity: 0.5; margin-bottom: 2px; display: flex; justify-content: space-between; align-items: center; }
+        .del-msg { color: var(--danger); cursor: pointer; padding: 2px 5px; font-weight: bold; font-size: 10px; }
 
         #input-zone { padding: 6px; background: var(--panel); display: flex; align-items: center; gap: 6px; border-top: 1px solid #1e293b; }
         #msg-in { flex: 1; background: #000; border: none; color: #fff; padding: 8px 12px; border-radius: 15px; font-size: 13px; height: 34px; }
         
         #modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 9999; }
-        .modal { background: var(--panel); padding: 12px; border-radius: 12px; width: 80%; max-width: 260px; border: 1px solid #333; }
-        .modal input { width: 100%; background: #000; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 6px; margin: 6px 0; font-size: 13px; }
+        .modal { background: var(--panel); padding: 12px; border-radius: 12px; width: 85%; max-width: 260px; border: 1px solid #333; }
+        .modal input { width: 100%; background: #000; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 8px; margin: 8px 0; font-size: 13px; }
         
-        .btn { background: var(--accent); border: none; color: white; padding: 5px 10px; border-radius: 5px; font-weight: bold; font-size: 11px; cursor: pointer; }
-        .icon { font-size: 18px; cursor: pointer; padding: 0 4px; display: flex; align-items: center; }
-        .rec-controls { display: none; gap: 10px; }
+        .btn { background: var(--accent); border: none; color: white; padding: 5px 12px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer; }
+        .icon { font-size: 20px; cursor: pointer; padding: 0 5px; display: flex; align-items: center; }
+        .rec-controls { display: none; gap: 15px; background: #000; padding: 5px 15px; border-radius: 20px; }
 
         @media (max-width: 768px) { 
             #sidebar { position: fixed; left: -220px; height: 100%; } 
@@ -84,7 +83,7 @@ app.get('/', (req, res) => {
             <b id="modal-title">Ввод</b>
             <input type="text" id="modal-input" autocomplete="off">
             <input type="text" id="modal-input-2" style="display:none;" autocomplete="off">
-            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:8px;">
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:10px;">
                 <button onclick="closeModal()" style="background:none; border:none; color:#aaa; font-size:11px;">Отмена</button>
                 <button id="modal-confirm" class="btn">ОК</button>
             </div>
@@ -93,28 +92,28 @@ app.get('/', (req, res) => {
 
     <div id="sidebar">
         <div class="sidebar-header">
-            <div onclick="askName()"><b id="user-name">...</b> ✏️</div>
-            <div id="user-id" style="font-size:10px; color:var(--accent); font-weight:bold;">ID: ...</div>
+            <div onclick="askName()" style="cursor:pointer;"><b id="user-name">Загрузка...</b> ✏️</div>
+            <div id="user-id" style="font-size:10px; color:var(--accent); font-weight:bold; margin-top:2px;">ID: ...</div>
         </div>
         <div id="rooms-list"></div>
-        <div style="padding:8px; display:flex; gap:4px;">
-            <button onclick="askGroup()" class="btn" style="flex:1">+Группа</button>
-            <button onclick="askFriend()" class="btn" style="flex:1; background:#262626;">+ЛС</button>
+        <div style="padding:10px; display:flex; gap:5px;">
+            <button onclick="askGroup()" class="btn" style="flex:1">+ Группа</button>
+            <button onclick="askFriend()" class="btn" style="flex:1; background:#333;">+ ЛС</button>
         </div>
     </div>
 
     <div id="chat-area">
         <div class="top-bar">
-            <button onclick="toggleMenu()" style="background:none; border:none; color:white; font-size:18px;">☰</button>
-            <b style="font-size:13px;">G-chat</b>
-            <button id="add-btn" class="btn" style="display:none; padding:2px 8px;">+</button>
+            <button onclick="toggleMenu()" style="background:none; border:none; color:white; font-size:20px;">☰</button>
+            <b style="font-size:14px; letter-spacing:1px;">G-chat</b>
+            <button id="add-btn" class="btn" style="display:none; padding:2px 10px;">+</button>
         </div>
         <div id="messages"></div>
         <div id="input-zone">
             <span id="attach-btn" class="icon" onclick="document.getElementById('file-in').click()">📎</span>
             <input type="file" id="file-in" hidden onchange="uploadFile()">
             
-            <input type="text" id="msg-in" placeholder="Сообщение...">
+            <input type="text" id="msg-in" placeholder="Сообщение..." autocomplete="off">
             
             <div id="voice-ui" class="rec-controls">
                 <span class="icon" onclick="cancelVoice()" style="color:var(--danger)">🗑️</span>
@@ -130,20 +129,32 @@ app.get('/', (req, res) => {
     <script>
         const socket = io();
         
-        const savedUser = localStorage.getItem('gchat_v10_user');
-        let userData = savedUser ? JSON.parse(savedUser) : {id: Math.floor(1000 + Math.random() * 8999), name: "Пользователь"};
-        localStorage.setItem('gchat_v10_user', JSON.stringify(userData));
-
-        let chats = JSON.parse(localStorage.getItem('gchat_v10_rooms')) || [];
+        // --- ЖЕЛЕЗОБЕТОННОЕ СОХРАНЕНИЕ ---
+        // Используем один ключ для всего профиля
+        const KEY = 'G-CHAT-STABLE-DATA';
+        const storage = JSON.parse(localStorage.getItem(KEY)) || {};
+        
+        let userData = {
+            id: storage.id || Math.floor(1000 + Math.random() * 8999),
+            name: storage.name || "Пользователь"
+        };
+        
+        let chats = storage.chats || [];
         let currentRoom = null;
         let mediaRecorder;
         let audioChunks = [];
         let isCancelled = false;
 
-        function save() {
-            localStorage.setItem('gchat_v10_user', JSON.stringify(userData));
-            localStorage.setItem('gchat_v10_rooms', JSON.stringify(chats));
+        function sync() {
+            localStorage.setItem(KEY, JSON.stringify({
+                id: userData.id,
+                name: userData.name,
+                chats: chats
+            }));
         }
+
+        // Вызываем сохранение один раз сразу, чтобы зафиксировать ID
+        sync();
 
         function showModal(title, fields, callback) {
             const overlay = document.getElementById('modal-overlay');
@@ -153,22 +164,24 @@ app.get('/', (req, res) => {
             document.getElementById('modal-title').innerText = title;
             i1.value = ''; i2.value = '';
             i2.style.display = fields > 1 ? 'block' : 'none';
+            i1.placeholder = fields > 1 ? "Ник друга" : "Ввод...";
+            i2.placeholder = "ID друга";
             document.getElementById('modal-confirm').onclick = () => { callback(i1.value, i2.value); closeModal(); };
         }
         function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
 
-        function askName() { showModal("Ваш ник", 1, n => { if(n) { userData.name = n; save(); updateUI(); } }); }
+        function askName() { showModal("Ваш ник", 1, n => { if(n) { userData.name = n; sync(); updateUI(); } }); }
         function askGroup() { showModal("Имя группы", 1, n => {
             if(n) {
                 const r = "grp-" + Date.now();
                 chats.push({name:n, room:r, type:'group', admin: userData.id});
-                save(); switchRoom(r);
+                sync(); switchRoom(r);
             }
         }); }
         function askFriend() { showModal("Добавить друга", 2, (name, id) => {
             if(name && id) {
                 const r = [userData.id, parseInt(id)].sort().join('-');
-                if(!chats.find(c => c.room === r)) { chats.push({name: name, room:r, type:'private', friendId: id}); save(); }
+                if(!chats.find(c => c.room === r)) { chats.push({name: name, room:r, type:'private', friendId: id}); sync(); }
                 switchRoom(r);
             }
         }); }
@@ -189,7 +202,17 @@ app.get('/', (req, res) => {
         function switchRoom(room) {
             currentRoom = room;
             const c = chats.find(x => x.room === room);
+            document.getElementById('chat-title').innerText = c ? c.name : "G-chat";
             document.getElementById('messages').innerHTML = '';
+            
+            const addBtn = document.getElementById('add-btn');
+            if(c && c.type === 'group' && c.admin === userData.id) {
+                addBtn.style.display = 'block';
+                addBtn.onclick = () => showModal("ID игрока", 1, id => {
+                    socket.emit('invite_to_group', { toId: parseInt(id), room: c.room, groupName: c.name });
+                });
+            } else { addBtn.style.display = 'none'; }
+
             const hist = JSON.parse(localStorage.getItem('h10_' + room) || '[]');
             hist.forEach(m => renderMsg(m));
             socket.emit('join_room', room);
@@ -206,8 +229,8 @@ app.get('/', (req, res) => {
             d.id = 'm-' + m.id;
             
             let content = m.content;
-            if(m.type === 'voice') content = \`<audio src="\${m.content}" controls style="width:140px; height:28px;"></audio>\`;
-            if(m.type === 'file') content = \`<a href="\${m.content}" download="\${m.fileName}" style="color:#fff">📄 Файл</a>\`;
+            if(m.type === 'voice') content = \`<audio src="\${m.content}" controls style="width:140px; height:30px;"></audio>\`;
+            if(m.type === 'file') content = \`<a href="\${m.content}" download="\${m.fileName}" style="color:#fff; font-size:11px;">📄 Файл</a>\`;
             
             const delBtn = m.userId == userData.id ? \`<span class="del-msg" onclick="deleteMsg('\${m.id}')">✕</span>\` : '';
 
@@ -222,7 +245,7 @@ app.get('/', (req, res) => {
         }
 
         function deleteMsg(id) {
-            if(confirm("Удалить сообщение для всех?")) socket.emit('delete_msg', {id, room: currentRoom});
+            if(confirm("Удалить?")) socket.emit('delete_msg', {id, room: currentRoom});
         }
 
         socket.on('msg_deleted', id => {
@@ -242,7 +265,6 @@ app.get('/', (req, res) => {
             if(m.room === currentRoom) renderMsg(m);
         });
 
-        // --- ГОЛОСОВЫЕ С УПРАВЛЕНИЕМ ---
         async function startVoice() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -267,7 +289,7 @@ app.get('/', (req, res) => {
                     resetVoiceUI();
                 };
                 mediaRecorder.start();
-            } catch(e) { alert("Микрофон заблокирован"); }
+            } catch(e) { alert("Ошибка микро"); }
         }
 
         function stopAndSendVoice() { if(mediaRecorder) mediaRecorder.stop(); }
@@ -291,13 +313,19 @@ app.get('/', (req, res) => {
 
         function uploadFile() {
             const file = document.getElementById('file-in').files[0];
+            if(!file) return;
             const reader = new FileReader();
             reader.onload = () => socket.emit('send_msg', { room: currentRoom, userId: userData.id, userName: userData.name, type: 'file', content: reader.result, fileName: file.name });
             reader.readAsDataURL(file);
         }
 
         socket.on('group_invite', d => {
-            if(confirm("Инвайт в: " + d.name)) { chats.push({name: d.name, room: d.room, type: 'group', admin: d.adminId}); save(); updateUI(); }
+            if(!chats.find(c => c.room === d.room)) {
+                if(confirm("Приглашение в группу " + d.name)) {
+                    chats.push({name: d.name, room: d.room, type: 'group', admin: d.adminId});
+                    sync(); updateUI();
+                }
+            }
         });
 
         socket.emit('register_me', userData.id);
