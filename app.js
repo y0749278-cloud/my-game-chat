@@ -1,27 +1,38 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const fs = require('fs'); // Для записи в файл
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
 
-// БАЗА ДАННЫХ НА СЕРВЕРЕ (теперь аккаунты не пропадут при удалении APK)
-let serverAccounts = {}; 
-let serverHistory = []; 
+const DB_FILE = './accounts.json';
+let serverAccounts = {};
+let serverHistory = [];
+
+// Загрузка базы из файла при старте
+if (fs.existsSync(DB_FILE)) {
+    try {
+        serverAccounts = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    } catch (e) { serverAccounts = {}; }
+}
+
+function saveDB() {
+    fs.writeFileSync(DB_FILE, JSON.stringify(serverAccounts, null, 2));
+}
 
 io.on('connection', (socket) => {
-    // Регистрация на сервере
     socket.on('server_register', (data) => {
         if (serverAccounts[data.name]) {
             socket.emit('auth_error', 'Имя уже занято!');
         } else {
             const newUser = { name: data.name, pass: data.pass, id: Math.floor(1000 + Math.random() * 8999) };
             serverAccounts[data.name] = newUser;
+            saveDB(); // Сохраняем в файл
             socket.emit('auth_success', newUser);
         }
     });
 
-    // Вход через сервер
     socket.on('server_login', (data) => {
         const acc = serverAccounts[data.name];
         if (acc && acc.pass === data.pass) {
@@ -44,6 +55,7 @@ io.on('connection', (socket) => {
     socket.on('send_msg', (data) => {
         const msg = { id: Date.now() + Math.random(), ...data };
         serverHistory.push(msg);
+        if (serverHistory.length > 500) serverHistory.shift();
         io.to(data.room).emit('new_msg', msg);
         if(data.isPrivate) {
             io.to("user-" + data.toId).emit('private_request', {
@@ -73,7 +85,17 @@ app.get('/', (req, res) => {
     <style>
         :root { --bg: #0b0e14; --panel: #151921; --accent: #7c3aed; --text: #ffffff; --danger: #ef4444; }
         * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100dvh; display: flex; overflow: hidden; }
+        
+        /* ФИКС ПЕРЕЗАГРУЗКИ ПРИ СКРОЛЛЕ */
+        body, html { 
+            overscroll-behavior-y: contain; 
+            background: var(--bg); 
+            color: var(--text); 
+            height: 100%; 
+            overflow: hidden; 
+        }
+        
+        body { font-family: 'Segoe UI', sans-serif; display: flex; }
         
         #auth-screen, .modal-overlay { position: fixed; inset: 0; background: rgba(7, 8, 12, 0.95); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px); padding: 20px; }
         .glass-box { background: var(--panel); padding: 30px; border-radius: 24px; width: 100%; max-width: 320px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
@@ -85,11 +107,13 @@ app.get('/', (req, res) => {
         .room-btn { padding: 15px; margin-bottom: 10px; background: rgba(255,255,255,0.03); border-radius: 16px; cursor: pointer; border: 1px solid transparent; }
         .room-btn.active { background: rgba(124, 58, 237, 0.2); border-color: var(--accent); }
 
-        #chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #07080c; }
+        #chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #07080c; position: relative; }
         .top-bar { height: 65px; padding: 0 20px; background: var(--panel); border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; }
-        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
         
-        .msg { max-width: 80%; padding: 12px 16px; border-radius: 20px; font-size: 14px; position: relative; }
+        /* СКРОЛЛ ЧАТА БЕЗ ПЕРЕЗАГРУЗОК */
+        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; overscroll-behavior-y: contain; }
+        
+        .msg { max-width: 80%; padding: 12px 16px; border-radius: 20px; font-size: 14px; position: relative; word-wrap: break-word; }
         .msg.me { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 4px; }
         .msg.them { align-self: flex-start; background: #1e293b; border-bottom-left-radius: 4px; }
         .del-btn { color: var(--danger); cursor: pointer; margin-left: 8px; font-weight: bold; }
@@ -97,8 +121,9 @@ app.get('/', (req, res) => {
         #input-zone { padding: 15px; background: var(--panel); display: flex; gap: 12px; align-items: center; border-top: 1px solid #1e293b; }
         #msg-in { flex: 1; border-radius: 30px; height: 42px; padding: 0 15px; background: #000; border: 1px solid #333; color: #fff; }
         .btn { background: var(--accent); border: none; color: white; padding: 10px 18px; border-radius: 14px; font-weight: bold; cursor: pointer; }
-        .icon-btn { font-size: 22px; cursor: pointer; color: #888; }
-        .rec-active { display: none; background: #000; padding: 5px 15px; border-radius: 20px; gap: 15px; color: #fff; }
+        .icon-btn { font-size: 22px; cursor: pointer; color: #888; padding: 5px; }
+        
+        .rec-active { display: none; background: #000; padding: 5px 15px; border-radius: 20px; gap: 15px; color: #fff; align-items: center; }
 
         @media (max-width: 768px) { #sidebar { position: fixed; left: -260px; height: 100%; } #sidebar.open { left: 0; } }
     </style>
@@ -150,11 +175,13 @@ app.get('/', (req, res) => {
             <span class="icon-btn" onclick="document.getElementById('file-in').click()">📎</span>
             <input type="file" id="file-in" hidden onchange="upFile()">
             <input type="text" id="msg-in" placeholder="Сообщение..." autocomplete="off">
+            
             <div id="rec-ui" class="rec-active">
-                <span onclick="stopRec(true)" style="color:var(--danger)">🗑️</span>
-                <span onclick="stopRec(false)" style="color:#22c55e">🛑 Отправить</span>
+                <span id="btn-cancel" style="color:var(--danger); cursor:pointer;">🗑️</span>
+                <span id="btn-stop" style="color:#22c55e; cursor:pointer;">🛑 Отправить</span>
             </div>
-            <span id="mic-btn" class="icon-btn" onclick="startRec()">🎤</span>
+            
+            <span id="mic-btn" class="icon-btn">🎤</span>
             <button onclick="send()" class="btn">➤</button>
         </div>
     </div>
@@ -167,17 +194,11 @@ app.get('/', (req, res) => {
         let curRoom = null;
         let recorder, chunks = [];
 
-        // АВТОРИЗАЦИЯ ЧЕРЕЗ СЕРВЕР
         function handleAuth(type) {
             const name = document.getElementById('a-name').value.trim();
             const pass = document.getElementById('a-pass').value.trim();
-            if(!name || !pass) return alert("Заполни поля!");
-            
-            if(type === 'reg') {
-                socket.emit('server_register', {name, pass});
-            } else {
-                socket.emit('server_login', {name, pass});
-            }
+            if(!name || !pass) return;
+            socket.emit(type === 'reg' ? 'server_register' : 'server_login', {name, pass});
         }
 
         socket.on('auth_success', (acc) => {
@@ -186,7 +207,6 @@ app.get('/', (req, res) => {
             document.getElementById('auth-screen').style.display='none';
             socket.emit('register_me', user.id);
             upd();
-            alert("Вход выполнен!");
         });
 
         socket.on('auth_error', (msg) => alert(msg));
@@ -197,11 +217,51 @@ app.get('/', (req, res) => {
             upd();
         }
 
-        // ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ (Группа, ЛС, Фото, Голос) - ОСТАЛИСЬ КАК БЫЛИ
+        // --- МОБИЛЬНЫЙ МИКРОФОН (ФИКС) ---
+        const micBtn = document.getElementById('mic-btn');
+        micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRec(); });
+        micBtn.addEventListener('click', () => { if(!recorder) startRec(); }); // Для ПК
+
+        document.getElementById('btn-stop').onclick = () => stopRec(false);
+        document.getElementById('btn-cancel').onclick = () => stopRec(true);
+
+        async function startRec() {
+            try {
+                const s = await navigator.mediaDevices.getUserMedia({audio:true});
+                recorder = new MediaRecorder(s);
+                chunks = [];
+                document.getElementById('rec-ui').style.display='flex';
+                micBtn.style.display='none';
+                recorder.ondataavailable = e => chunks.push(e.data);
+                recorder.onstop = () => {
+                    if(chunks.length > 0) {
+                        const blob = new Blob(chunks, {type:'audio/ogg'});
+                        const r = new FileReader();
+                        r.onload = () => {
+                            const c = chats.find(x=>x.room===curRoom);
+                            socket.emit('send_msg', {
+                                room:curRoom, userId:user.id, userName:user.name, 
+                                content:r.result, type:'voice', isPrivate: c.type==='private', toId: c.tid
+                            });
+                        };
+                        r.readAsDataURL(blob);
+                    }
+                    document.getElementById('rec-ui').style.display='none';
+                    micBtn.style.display='block';
+                    recorder = null;
+                };
+                recorder.start();
+            } catch(e) { alert("Ошибка микрофона: " + e); }
+        }
+        function stopRec(cancel) { if(cancel) chunks = []; recorder.stop(); }
+
+        // --- ОСТАЛЬНОЕ ---
         function openM(t, f) {
             document.getElementById('modal-overlay').style.display='flex';
             document.getElementById('m-title').innerText = t;
+            document.getElementById('m-i1').value = '';
             document.getElementById('m-i2').style.display = f===2?'block':'none';
+            document.getElementById('m-i2').value = '';
             document.getElementById('m-ok').onclick = () => {
                 const n1 = document.getElementById('m-i1').value;
                 const n2 = document.getElementById('m-i2').value;
@@ -264,40 +324,15 @@ app.get('/', (req, res) => {
             }
         }
 
-        async function startRec() {
-            const s = await navigator.mediaDevices.getUserMedia({audio:true});
-            recorder = new MediaRecorder(s);
-            chunks = [];
-            document.getElementById('rec-ui').style.display='flex';
-            document.getElementById('mic-btn').style.display='none';
-            recorder.ondataavailable = e => chunks.push(e.data);
-            recorder.onstop = () => {
-                if(chunks.length > 0) {
-                    const blob = new Blob(chunks, {type:'audio/ogg'});
-                    const r = new FileReader();
-                    r.onload = () => {
-                        const c = chats.find(x=>x.room===curRoom);
-                        const d = {room:curRoom, userId:user.id, userName:user.name, content:r.result, type:'voice'};
-                        if(c && c.type==='private') { d.isPrivate=true; d.toId=c.tid; }
-                        socket.emit('send_msg', d);
-                    };
-                    r.readAsDataURL(blob);
-                }
-                document.getElementById('rec-ui').style.display='none';
-                document.getElementById('mic-btn').style.display='flex';
-            };
-            recorder.start();
-        }
-        function stopRec(cancel) { if(cancel) chunks = []; recorder.stop(); }
-
         function upFile() {
             const f = document.getElementById('file-in').files[0];
             const r = new FileReader();
             r.onload = () => {
                 const c = chats.find(x=>x.room===curRoom);
-                const d = {room:curRoom, userId:user.id, userName:user.name, content:r.result, type:'file', fileName:f.name};
-                if(c && c.type==='private') { d.isPrivate=true; d.toId=c.tid; }
-                socket.emit('send_msg', d);
+                socket.emit('send_msg', {
+                    room:curRoom, userId:user.id, userName:user.name, 
+                    content:r.result, type:'file', fileName:f.name, isPrivate: c.type==='private', toId: c.tid
+                });
             };
             r.readAsDataURL(f);
         }
@@ -312,7 +347,7 @@ app.get('/', (req, res) => {
             d.className = 'msg ' + (m.userId==user.id?'me':'them');
             d.id = 'm-'+m.id;
             let html = m.content;
-            if(m.type==='voice') html = '<audio src="'+m.content+'" controls style="width:200px; height:35px;"></audio>';
+            if(m.type==='voice') html = '<audio src="'+m.content+'" controls style="max-width:200px; height:35px;"></audio>';
             if(m.type==='file') {
                 if(m.content.startsWith('data:image')) html = '<img src="'+m.content+'" style="max-width:100%; border-radius:10px;">';
                 else html = '<a href="'+m.content+'" download="'+m.fileName+'" style="color:#fff">📄 '+m.fileName+'</a>';
