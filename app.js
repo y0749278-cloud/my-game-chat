@@ -5,9 +5,32 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
 
+// БАЗА ДАННЫХ НА СЕРВЕРЕ (теперь аккаунты не пропадут при удалении APK)
+let serverAccounts = {}; 
 let serverHistory = []; 
 
 io.on('connection', (socket) => {
+    // Регистрация на сервере
+    socket.on('server_register', (data) => {
+        if (serverAccounts[data.name]) {
+            socket.emit('auth_error', 'Имя уже занято!');
+        } else {
+            const newUser = { name: data.name, pass: data.pass, id: Math.floor(1000 + Math.random() * 8999) };
+            serverAccounts[data.name] = newUser;
+            socket.emit('auth_success', newUser);
+        }
+    });
+
+    // Вход через сервер
+    socket.on('server_login', (data) => {
+        const acc = serverAccounts[data.name];
+        if (acc && acc.pass === data.pass) {
+            socket.emit('auth_success', acc);
+        } else {
+            socket.emit('auth_error', 'Неверный логин или пароль!');
+        }
+    });
+
     socket.on('register_me', (id) => { 
         socket.myId = id; 
         socket.join("user-" + id); 
@@ -21,7 +44,6 @@ io.on('connection', (socket) => {
     socket.on('send_msg', (data) => {
         const msg = { id: Date.now() + Math.random(), ...data };
         serverHistory.push(msg);
-        if (serverHistory.length > 1000) serverHistory.shift();
         io.to(data.room).emit('new_msg', msg);
         if(data.isPrivate) {
             io.to("user-" + data.toId).emit('private_request', {
@@ -88,8 +110,8 @@ app.get('/', (req, res) => {
             <h2 style="color:var(--accent); margin-bottom:20px;">G-CHAT</h2>
             <input type="text" id="a-name" placeholder="Логин">
             <input type="password" id="a-pass" placeholder="Пароль">
-            <button onclick="auth('login')" class="btn" style="width:100%; margin-bottom:10px;">ВОЙТИ</button>
-            <button onclick="auth('reg')" class="btn" style="width:100%; background:#222;">РЕГИСТРАЦИЯ</button>
+            <button onclick="handleAuth('login')" class="btn" style="width:100%; margin-bottom:10px;">ВОЙТИ</button>
+            <button onclick="handleAuth('reg')" class="btn" style="width:100%; background:#222;">РЕГИСТРАЦИЯ</button>
         </div>
     </div>
 
@@ -140,29 +162,34 @@ app.get('/', (req, res) => {
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let user = JSON.parse(localStorage.getItem('g_u_final'));
-        let chats = JSON.parse(localStorage.getItem('g_c_final')) || [];
+        let user = JSON.parse(localStorage.getItem('g_u_saved'));
+        let chats = JSON.parse(localStorage.getItem('g_c_saved')) || [];
         let curRoom = null;
         let recorder, chunks = [];
 
-        function auth(t) {
-            const n = document.getElementById('a-name').value.trim();
-            const p = document.getElementById('a-pass').value.trim();
-            if(!n || !p) return;
-            let db = JSON.parse(localStorage.getItem('G_DB_VFINAL')) || {};
-            if(t === 'reg') {
-                if(db[n]) return alert("Занято");
-                db[n] = { name:n, pass:p, id: Math.floor(1000+Math.random()*8999) };
-                localStorage.setItem('G_DB_VFINAL', JSON.stringify(db));
-                alert("Аккаунт создан!");
+        // АВТОРИЗАЦИЯ ЧЕРЕЗ СЕРВЕР
+        function handleAuth(type) {
+            const name = document.getElementById('a-name').value.trim();
+            const pass = document.getElementById('a-pass').value.trim();
+            if(!name || !pass) return alert("Заполни поля!");
+            
+            if(type === 'reg') {
+                socket.emit('server_register', {name, pass});
             } else {
-                if(db[n] && db[n].pass === p) {
-                    user = db[n];
-                    localStorage.setItem('g_u_final', JSON.stringify(user));
-                    location.reload();
-                } else alert("Ошибка входа!");
+                socket.emit('server_login', {name, pass});
             }
         }
+
+        socket.on('auth_success', (acc) => {
+            user = acc;
+            localStorage.setItem('g_u_saved', JSON.stringify(user));
+            document.getElementById('auth-screen').style.display='none';
+            socket.emit('register_me', user.id);
+            upd();
+            alert("Вход выполнен!");
+        });
+
+        socket.on('auth_error', (msg) => alert(msg));
 
         if(user) {
             document.getElementById('auth-screen').style.display='none';
@@ -170,6 +197,7 @@ app.get('/', (req, res) => {
             upd();
         }
 
+        // ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ (Группа, ЛС, Фото, Голос) - ОСТАЛИСЬ КАК БЫЛИ
         function openM(t, f) {
             document.getElementById('modal-overlay').style.display='flex';
             document.getElementById('m-title').innerText = t;
@@ -190,7 +218,7 @@ app.get('/', (req, res) => {
             };
         }
         function closeM() { document.getElementById('modal-overlay').style.display='none'; }
-        function save(r) { localStorage.setItem('g_c_final', JSON.stringify(chats)); switchR(r); }
+        function save(r) { localStorage.setItem('g_c_saved', JSON.stringify(chats)); switchR(r); }
 
         function switchR(r) {
             curRoom = r;
@@ -285,7 +313,10 @@ app.get('/', (req, res) => {
             d.id = 'm-'+m.id;
             let html = m.content;
             if(m.type==='voice') html = '<audio src="'+m.content+'" controls style="width:200px; height:35px;"></audio>';
-            if(m.type==='file') html = '<a href="'+m.content+'" download="'+m.fileName+'" style="color:#fff">📄 '+m.fileName+'</a>';
+            if(m.type==='file') {
+                if(m.content.startsWith('data:image')) html = '<img src="'+m.content+'" style="max-width:100%; border-radius:10px;">';
+                else html = '<a href="'+m.content+'" download="'+m.fileName+'" style="color:#fff">📄 '+m.fileName+'</a>';
+            }
             const del = m.userId==user.id ? '<span class="del-btn" onclick="delM(\\''+m.id+'\\')">✕</span>' : '';
             d.innerHTML = '<div style="font-size:10px; opacity:0.6"><b>'+m.userName+'</b>'+del+'</div>' + html;
             b.appendChild(d);
@@ -298,7 +329,7 @@ app.get('/', (req, res) => {
             const r = [user.id, d.fromId].sort().join('_');
             if(!chats.find(x=>x.room===r)) {
                 chats.push({name:d.fromName, room:r, type:'private', tid:d.fromId});
-                localStorage.setItem('g_c_final', JSON.stringify(chats));
+                localStorage.setItem('g_c_saved', JSON.stringify(chats));
                 upd();
             }
         });
@@ -307,7 +338,7 @@ app.get('/', (req, res) => {
             if(!chats.find(x=>x.room===d.room)) {
                 if(confirm("Приглашение в группу "+d.name)) {
                     chats.push({name:d.name, room:d.room, type:'group', admin:d.adminId});
-                    localStorage.setItem('g_c_final', JSON.stringify(chats));
+                    localStorage.setItem('g_c_saved', JSON.stringify(chats));
                     upd();
                 }
             }
