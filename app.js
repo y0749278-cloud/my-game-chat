@@ -1,59 +1,66 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const mongoose = require('mongoose'); // Добавили базу
-
+const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { maxHttpBufferSize: 1e8 });
-
-// СЮДА ВСТАВЬ СВОЮ ССЫЛКУ ИЗ ШАГА 1
-const MONGO_URI = "ТВОЯ_ССЫЛКА_ИЗ_MONGODB_ATLAS";
-
-// Настройка схемы базы данных
-mongoose.connect(MONGO_URI).then(() => console.log("База подключена!")).catch(err => console.error(err));
-
-const UserSchema = new mongoose.Schema({
-    name: String,
-    pass: String,
-    uid: Number,
-    chats: Array
-});
-const MsgSchema = new mongoose.Schema({
-    room: String,
-    userId: Number,
-    userName: String,
-    content: String,
-    type: String,
-    fileName: String,
-    isPrivate: Boolean,
-    toId: Number,
-    date: { type: Date, default: Date.now }
+const io = new Server(server, { 
+    maxHttpBufferSize: 1e8,
+    cors: { origin: "*" } 
 });
 
-const User = mongoose.model('User', UserSchema);
-const Message = mongoose.model('Message', MsgSchema);
+// ПУТЬ К БАЗЕ ДАННЫХ (ФАЙЛ)
+const DB_FILE = './database.json';
+let db = { accounts: {}, chats: {}, history: [] };
+
+// Загрузка данных при старте сервера
+if (fs.existsSync(DB_FILE)) {
+    try {
+        const data = fs.readFileSync(DB_FILE, 'utf8');
+        db = JSON.parse(data);
+        console.log("База данных загружена успешно");
+    } catch (e) {
+        console.log("Ошибка загрузки базы, создаем новую");
+    }
+}
+
+// Функция сохранения
+function saveDB() {
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+    } catch (e) {
+        console.error("Ошибка сохранения файла:", e);
+    }
+}
 
 io.on('connection', (socket) => {
-    // ВХОД И РЕГИСТРАЦИЯ (ТЕПЕРЬ ВЕЧНЫЕ)
-    socket.on('server_auth', async (data) => {
-        const { name, pass, type } = data;
-        let user = await User.findOne({ name });
+    console.log('Новое подключение:', socket.id);
 
+    // ВХОД И РЕГИСТРАЦИЯ
+    socket.on('server_auth', (data) => {
+        const { name, pass, type } = data;
+        
         if (type === 'reg') {
-            if (user) return socket.emit('auth_error', 'Имя занято!');
-            const newUser = new User({ 
-                name, pass, 
-                uid: Math.floor(1000 + Math.random() * 8999),
-                chats: [] 
-            });
-            await newUser.save();
-            socket.emit('auth_success', { name: newUser.name, id: newUser.uid });
+            if (db.accounts[name]) {
+                return socket.emit('auth_error', 'Это имя уже занято!');
+            }
+            const newUser = { 
+                name, 
+                pass, 
+                id: Math.floor(1000 + Math.random() * 8999) 
+            };
+            db.accounts[name] = newUser;
+            db.chats[newUser.id] = [];
+            saveDB();
+            socket.emit('auth_success', { name: newUser.name, id: newUser.id });
         } else {
-            if (user && user.pass === pass) {
-                socket.emit('auth_success', { name: user.name, id: user.uid });
-                socket.emit('sync_chats', user.chats);
-            } else socket.emit('auth_error', 'Неверный логин или пароль!');
+            const acc = db.accounts[name];
+            if (acc && acc.pass === pass) {
+                socket.emit('auth_success', { name: acc.name, id: acc.id });
+                socket.emit('sync_chats', db.chats[acc.id] || []);
+            } else {
+                socket.emit('auth_error', 'Неверный логин или пароль!');
+            }
         }
     });
 
@@ -62,33 +69,57 @@ io.on('connection', (socket) => {
         socket.join("user-" + id); 
     });
 
-    socket.on('join_room', async (room) => { 
+    socket.on('join_room', (room) => { 
         socket.join(room); 
-        const history = await Message.find({ room }).sort({ date: 1 }).limit(100);
-        socket.emit('load_history', history);
+        const roomHistory = db.history.filter(m => m.room === room).slice(-50);
+        socket.emit('load_history', roomHistory);
     });
 
-    socket.on('send_msg', async (data) => {
-        const newMsg = new Message(data);
-        await newMsg.save();
-        io.to(data.room).emit('new_msg', newMsg);
+    socket.on('send_msg', (data) => {
+        const msg = { 
+            id: Date.now() + Math.random(), 
+            date: new Date(),
+            ...data 
+        };
         
+        db.history.push(msg);
+        if (db.history.length > 1000) db.history.shift(); // Ограничение истории
+        
+        io.to(data.room).emit('new_msg', msg);
+        
+        // Логика для Личных Сообщений (ЛС)
         if(data.isPrivate) {
-            // Сохраняем чат в профиль обоим, чтобы он не пропадал
-            await User.updateMany(
-                { uid: { $in: [data.userId, data.toId] } },
-                { $addToSet: { chats: { name: data.userName, room: data.room, type: 'private', tid: data.userId } } }
-            );
-            io.to("user-" + data.toId).emit('private_request', { fromName: data.userName, fromId: data.userId, room: data.room });
+            const room = data.room;
+            [data.userId, data.toId].forEach(uid => {
+                if(!db.chats[uid]) db.chats[uid] = [];
+                if(!db.chats[uid].find(c => c.room === room)) {
+                    db.chats[uid].push({ 
+                        name: data.userName, 
+                        room, 
+                        type: 'private', 
+                        tid: data.userId 
+                    });
+                }
+            });
+            saveDB();
+            io.to("user-" + data.toId).emit('private_request', { 
+                fromName: data.userName, 
+                fromId: data.userId, 
+                room: data.room 
+            });
         }
     });
 
-    socket.on('save_chat_to_server', async (data) => {
-        await User.updateOne({ uid: data.uid }, { $addToSet: { chats: data.chat } });
+    socket.on('save_chat_to_server', (data) => {
+        if(!db.chats[data.uid]) db.chats[data.uid] = [];
+        if(!db.chats[data.uid].find(c => c.room === data.chat.room)) {
+            db.chats[data.uid].push(data.chat);
+            saveDB();
+        }
     });
 });
 
-// КЛИЕНТСКАЯ ЧАСТЬ (ОСТАВИЛ ТВОЙ ДИЗАЙН И ФИКСЫ)
+// КЛИЕНТСКИЙ ИНТЕРФЕЙС (ФРОНТЕНД)
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -96,7 +127,7 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>G-chat Ultra Eternal</title>
+    <title>G-CHAT ULTRA</title>
     <style>
         :root { --bg: #0b0e14; --panel: #151921; --accent: #7c3aed; --text: #ffffff; }
         * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
@@ -125,16 +156,59 @@ app.get('/', (req, res) => {
     </style>
 </head>
 <body>
-    <div id="auth-screen"><div class="glass-box"><h2 style="color:var(--accent); margin-bottom:20px;">G-CHAT</h2><input type="text" id="a-name" placeholder="Логин"><input type="password" id="a-pass" placeholder="Пароль"><button onclick="auth('login')" class="btn" style="width:100%; margin-bottom:12px;">ВОЙТИ</button><button onclick="auth('reg')" class="btn" style="width:100%; background:#222;">РЕГИСТРАЦИЯ</button></div></div>
-    <div id="sidebar"><div class="sidebar-header"><b id="u-name">...</b><br><span id="u-id"></span></div><div id="rooms-list"></div><div style="padding:15px; display:flex; gap:8px;"><button onclick="openM('Группа', 1)" class="btn" style="flex:1;">+ ГРУППА</button><button onclick="openM('Личка', 2)" class="btn" style="flex:1; background:#222;">+ ЛС</button></div></div>
-    <div id="chat-area"><div class="top-bar"><button onclick="document.getElementById('sidebar').classList.toggle('open')" style="background:none; border:none; color:white; font-size:28px;">☰</button><b id="c-title">Выберите чат</b><div id="rec-status" class="rec-active">ЗАПИСЬ...</div></div><div id="messages"></div><div id="input-zone"><span class="icon-btn" onclick="document.getElementById('file-in').click()">📎</span><input type="file" id="file-in" hidden onchange="upFile()"><input type="text" id="msg-in" placeholder="Сообщение..." autocomplete="off"><span id="mic-btn" class="icon-btn">🎤</span><button onclick="sendMsg()" class="btn">➤</button></div></div>
-    <div id="modal-overlay" class="modal-overlay" style="display:none;"><div class="glass-box"><b id="m-title" style="display:block; margin-bottom:15px;"></b><input type="text" id="m-i1" placeholder="Имя"><input type="text" id="m-i2" placeholder="ID друга" style="display:none;"><button id="m-ok" class="btn" style="width:100%;">ОК</button><button onclick="closeM()" class="btn" style="width:100%; background:#222; margin-top:10px;">ОТМЕНА</button></div></div>
+    <div id="auth-screen">
+        <div class="glass-box">
+            <h2 style="color:var(--accent); margin-bottom:20px;">G-CHAT</h2>
+            <input type="text" id="a-name" placeholder="Логин">
+            <input type="password" id="a-pass" placeholder="Пароль">
+            <button onclick="auth('login')" class="btn" style="width:100%; margin-bottom:12px;">ВОЙТИ</button>
+            <button onclick="auth('reg')" class="btn" style="width:100%; background:#222;">РЕГИСТРАЦИЯ</button>
+        </div>
+    </div>
+
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <b id="u-name">...</b><br>
+            <span id="u-id" style="font-size:12px; color:var(--accent)"></span>
+        </div>
+        <div id="rooms-list"></div>
+        <div style="padding:15px; display:flex; gap:8px;">
+            <button onclick="openM('Группа', 1)" class="btn" style="flex:1;">+ ГРУППА</button>
+            <button onclick="openM('Личка', 2)" class="btn" style="flex:1; background:#222;">+ ЛС</button>
+        </div>
+    </div>
+
+    <div id="chat-area">
+        <div class="top-bar">
+            <button onclick="document.getElementById('sidebar').classList.toggle('open')" style="background:none; border:none; color:white; font-size:28px;">☰</button>
+            <b id="c-title">Выберите чат</b>
+            <div id="rec-status" class="rec-active">ЗАПИСЬ...</div>
+        </div>
+        <div id="messages"></div>
+        <div id="input-zone">
+            <span class="icon-btn" onclick="document.getElementById('file-in').click()">📎</span>
+            <input type="file" id="file-in" hidden onchange="upFile()">
+            <input type="text" id="msg-in" placeholder="Сообщение..." autocomplete="off">
+            <span id="mic-btn" class="icon-btn">🎤</span>
+            <button onclick="sendMsg()" class="btn">➤</button>
+        </div>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay" style="display:none;">
+        <div class="glass-box">
+            <b id="m-title" style="display:block; margin-bottom:15px;"></b>
+            <input type="text" id="m-i1" placeholder="Имя">
+            <input type="text" id="m-i2" placeholder="ID друга" style="display:none;">
+            <button id="m-ok" class="btn" style="width:100%;">ОК</button>
+            <button onclick="closeM()" class="btn" style="width:100%; background:#222; margin-top:10px;">ОТМЕНА</button>
+        </div>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let user = JSON.parse(localStorage.getItem('g_user_v11'));
-        let chats = [];
+        let user = JSON.parse(localStorage.getItem('g_u_v12'));
+        let chats = JSON.parse(localStorage.getItem('g_c_v12')) || [];
         let curRoom = null;
         let recorder, chunks = [];
 
@@ -147,14 +221,19 @@ app.get('/', (req, res) => {
 
         socket.on('auth_success', acc => {
             user = acc;
-            localStorage.setItem('g_user_v11', JSON.stringify(user));
-            location.reload();
-        });
-
-        socket.on('sync_chats', serverChats => {
-            chats = serverChats;
+            localStorage.setItem('g_u_v12', JSON.stringify(user));
+            document.getElementById('auth-screen').style.display='none';
+            socket.emit('register_me', user.id);
             upd();
         });
+
+        socket.on('sync_chats', sChats => {
+            chats = sChats;
+            localStorage.setItem('g_c_v12', JSON.stringify(chats));
+            upd();
+        });
+
+        socket.on('auth_error', msg => alert(msg));
 
         if(user) {
             document.getElementById('auth-screen').style.display='none';
@@ -162,25 +241,25 @@ app.get('/', (req, res) => {
             upd();
         }
 
-        // КНОПКА МИКРОФОНА (ДЛЯ ANDROID)
+        // МИКРОФОН
         const micBtn = document.getElementById('mic-btn');
-        micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startVoice(); });
-        micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopVoice(); });
-        micBtn.addEventListener('mousedown', startVoice);
-        micBtn.addEventListener('mouseup', stopVoice);
+        micBtn.addEventListener('touchstart', e => { e.preventDefault(); startV(); });
+        micBtn.addEventListener('touchend', e => { e.preventDefault(); stopV(); });
+        micBtn.addEventListener('mousedown', startV);
+        micBtn.addEventListener('mouseup', stopV);
 
-        async function startVoice() {
+        async function startV() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+                recorder = new MediaRecorder(s, { mimeType: 'audio/webm' });
                 chunks = [];
                 recorder.ondataavailable = e => chunks.push(e.data);
                 recorder.start();
                 document.getElementById('rec-status').style.display = 'block';
-            } catch(e) { alert("Микрофон недоступен"); }
+            } catch(e) { alert("Включи микрофон!"); }
         }
 
-        function stopVoice() {
+        function stopV() {
             if(!recorder) return;
             recorder.stop();
             document.getElementById('rec-status').style.display = 'none';
@@ -191,7 +270,7 @@ app.get('/', (req, res) => {
                     const c = chats.find(x => x.room === curRoom);
                     socket.emit('send_msg', {
                         room: curRoom, userId: user.id, userName: user.name, 
-                        content: r.result, type: 'voice', isPrivate: c && c.type==='private', toId: c ? c.tid : null
+                        content: r.result, type: 'voice', isPrivate: c?.type==='private', toId: c?.tid
                     });
                 };
                 r.readAsDataURL(blob);
@@ -199,7 +278,6 @@ app.get('/', (req, res) => {
             };
         }
 
-        // ЧАТЫ, СООБЩЕНИЯ (СТАРЫЙ ФУНКЦИОНАЛ)
         function openM(t, f) {
             document.getElementById('modal-overlay').style.display='flex';
             document.getElementById('m-title').innerText = t;
@@ -243,7 +321,7 @@ app.get('/', (req, res) => {
             if(i.value && curRoom) {
                 socket.emit('send_msg', { 
                     room:curRoom, userId:user.id, userName:user.name, 
-                    content:i.value, type:'text', isPrivate: c && c.type==='private', toId: c ? c.tid : null 
+                    content:i.value, type:'text', isPrivate: c?.type==='private', toId: c?.tid 
                 });
                 i.value = '';
             }
@@ -256,19 +334,20 @@ app.get('/', (req, res) => {
                 const c = chats.find(x=>x.room===curRoom);
                 socket.emit('send_msg', {
                     room:curRoom, userId:user.id, userName:user.name, 
-                    content:r.result, type:'file', fileName:f.name, isPrivate: c && c.type==='private', toId: c ? c.tid : null
+                    content:r.result, type:'file', fileName:f.name, isPrivate: c?.type==='private', toId: c?.tid
                 });
             };
             r.readAsDataURL(f);
         }
 
         function render(m) {
-            if(document.getElementById('m-'+m._id || m.id)) return;
+            if(document.getElementById('m-'+m.id)) return;
             const b = document.getElementById('messages');
             const d = document.createElement('div');
             d.className = 'msg ' + (m.userId==user.id?'me':'them');
+            d.id = 'm-'+m.id;
             let html = m.content;
-            if(m.type==='voice') html = '<audio src="'+m.content+'" controls style="max-width:210px; height:40px; filter: invert(1);"></audio>';
+            if(m.type==='voice') html = '<audio src="'+m.content+'" controls style="max-width:200px; height:40px; filter:invert(1)"></audio>';
             if(m.type==='file') {
                 if(m.content.startsWith('data:image')) html = '<img src="'+m.content+'" style="max-width:100%; border-radius:12px;">';
                 else html = '<a href="'+m.content+'" download="'+m.fileName+'" style="color:#fff;">📄 '+m.fileName+'</a>';
@@ -307,4 +386,5 @@ app.get('/', (req, res) => {
     `);
 });
 
-server.listen(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log('Сервер запущен на порту ' + PORT));
