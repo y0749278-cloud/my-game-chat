@@ -12,19 +12,27 @@ io.on('connection', (socket) => {
         socket.myId = id; 
         socket.join("user-" + id); 
     });
+    
     socket.on('join_room', (room) => { 
         socket.join(room); 
-        socket.emit('load_server_history', serverHistory.filter(m => m.room === room)); 
+        // Отправляем историю конкретно этому сокету
+        const roomHistory = serverHistory.filter(m => m.room === room);
+        socket.emit('load_history', roomHistory);
     });
+
     socket.on('send_msg', (data) => {
         const msg = { id: Date.now() + Math.random(), ...data };
         serverHistory.push(msg);
+        if (serverHistory.length > 1000) serverHistory.shift();
+        // Рассылаем ВСЕМ в комнате
         io.to(data.room).emit('new_msg', msg);
     });
+
     socket.on('delete_msg', (data) => {
         serverHistory = serverHistory.filter(m => m.id !== data.id);
-        io.emit('msg_deleted', data.id); // Рассылаем всем
+        io.emit('msg_deleted', data.id);
     });
+
     socket.on('invite_to_group', (data) => {
         io.to("user-" + data.toId).emit('group_invite', { room: data.room, name: data.groupName, adminId: socket.myId });
     });
@@ -41,40 +49,46 @@ app.get('/', (req, res) => {
     <style>
         :root { --bg: #07080c; --panel: #0f1117; --accent: #6d28d9; --text: #f3f4f6; --danger: #ff4444; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; margin: 0; padding: 0; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); height: 100dvh; display: flex; overflow: hidden; font-size: 13px; }
+        body { font-family: 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100dvh; display: flex; overflow: hidden; font-size: 14px; }
         
-        /* Окно Логина */
-        #auth-screen { position: fixed; inset: 0; background: var(--bg); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .auth-box { background: var(--panel); padding: 25px; border-radius: 20px; width: 100%; max-width: 320px; border: 1px solid #222; text-align: center; }
-        .auth-box h2 { margin-bottom: 20px; color: var(--accent); }
-        .auth-box input { width: 100%; background: #000; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 10px; margin-bottom: 10px; }
+        /* Модалки и Регистрация */
+        #auth-screen, #modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(5px); }
+        .ui-box { background: var(--panel); padding: 25px; border-radius: 20px; width: 100%; max-width: 300px; border: 1px solid #222; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        input { width: 100%; background: #000; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 12px; margin-bottom: 12px; font-size: 14px; }
+        input:focus { border-color: var(--accent); }
 
-        /* Основной интерфейс */
-        #sidebar { width: 240px; background: var(--panel); border-right: 1px solid #1e293b; display: flex; flex-direction: column; transition: 0.2s; z-index: 1000; }
-        .sidebar-header { padding: 15px; border-bottom: 1px solid var(--accent); }
-        #rooms-list { flex: 1; overflow-y: auto; padding: 5px; }
-        .room-btn { padding: 12px; margin-bottom: 5px; background: #161b22; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
-        .room-btn.active { border-color: var(--accent); background: rgba(109, 40, 217, 0.2); }
+        /* Интерфейс */
+        #sidebar { width: 240px; background: var(--panel); border-right: 1px solid #1e293b; display: flex; flex-direction: column; transition: 0.3s; z-index: 1000; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--accent); background: rgba(109, 40, 217, 0.05); }
+        #rooms-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .room-btn { padding: 12px; margin-bottom: 8px; background: #161b22; border-radius: 12px; cursor: pointer; border: 1px solid transparent; transition: 0.2s; }
+        .room-btn.active { border-color: var(--accent); background: rgba(109, 40, 217, 0.15); }
 
-        #chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-        .top-bar { height: 50px; padding: 0 15px; background: var(--panel); border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; }
-        #messages { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+        #chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+        .top-bar { height: 55px; padding: 0 15px; background: var(--panel); border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; }
+        #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; background: #07080c; }
         
-        .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; font-size: 13px; position: relative; word-wrap: break-word; }
-        .msg.me { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 2px; }
-        .msg.them { align-self: flex-start; background: #1e293b; border-bottom-left-radius: 2px; }
-        .msg-meta { font-size: 9px; opacity: 0.6; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; }
-        .del-msg { color: var(--danger); cursor: pointer; font-weight: bold; padding: 0 5px; }
+        /* Сообщения */
+        .msg { max-width: 85%; padding: 10px 14px; border-radius: 16px; font-size: 13.5px; position: relative; animation: fadeIn 0.2s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } }
+        .msg.me { align-self: flex-end; background: var(--accent); border-bottom-right-radius: 4px; }
+        .msg.them { align-self: flex-start; background: #1e293b; border-bottom-left-radius: 4px; }
+        .msg-meta { font-size: 10px; opacity: 0.5; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        .del-msg { color: var(--danger); cursor: pointer; font-weight: bold; font-size: 12px; padding: 2px; }
 
-        #input-zone { padding: 10px; background: var(--panel); display: flex; align-items: center; gap: 8px; border-top: 1px solid #1e293b; }
-        #msg-in { flex: 1; background: #000; border: none; color: #fff; padding: 10px 15px; border-radius: 20px; font-size: 14px; }
+        /* Ввод */
+        #input-zone { padding: 12px; background: var(--panel); display: flex; align-items: center; gap: 10px; border-top: 1px solid #1e293b; }
+        #msg-in { flex: 1; margin-bottom: 0; border-radius: 25px; padding: 10px 18px; height: 42px; }
         
-        .btn { background: var(--accent); border: none; color: white; padding: 10px 15px; border-radius: 10px; font-weight: bold; cursor: pointer; }
-        .icon { font-size: 22px; cursor: pointer; color: #aaa; }
-        .rec-controls { display: none; gap: 20px; background: #000; padding: 5px 20px; border-radius: 20px; }
+        .btn { background: var(--accent); border: none; color: white; padding: 10px 18px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn:active { transform: scale(0.95); opacity: 0.8; }
+        .icon-btn { font-size: 22px; cursor: pointer; color: #888; transition: 0.2s; }
+        .icon-btn:hover { color: var(--accent); }
+        
+        .rec-controls { display: none; gap: 15px; background: #000; padding: 8px 20px; border-radius: 25px; align-items: center; }
 
         @media (max-width: 768px) { 
-            #sidebar { position: fixed; left: -240px; height: 100%; } 
+            #sidebar { position: fixed; left: -240px; height: 100%; box-shadow: 10px 0 30px rgba(0,0,0,0.5); } 
             #sidebar.open { left: 0; }
         }
     </style>
@@ -82,24 +96,36 @@ app.get('/', (req, res) => {
 <body>
 
     <div id="auth-screen">
-        <div class="auth-box">
-            <h2>G-chat</h2>
-            <input type="text" id="auth-name" placeholder="Имя">
-            <input type="password" id="auth-pass" placeholder="Пароль">
-            <button onclick="handleAuth('login')" class="btn" style="width:100%; margin-bottom:10px;">Войти</button>
-            <button onclick="handleAuth('reg')" class="btn" style="width:100%; background:#222;">Регистрация</button>
+        <div class="ui-box">
+            <h2 style="margin-bottom:15px; text-align:center;">G-chat</h2>
+            <input type="text" id="auth-name" placeholder="Ваше имя">
+            <input type="password" id="auth-pass" placeholder="Ваш пароль">
+            <button onclick="doAuth('login')" class="btn" style="width:100%; margin-bottom:10px;">Войти</button>
+            <button onclick="doAuth('reg')" class="btn" style="width:100%; background:#222;">Регистрация</button>
+        </div>
+    </div>
+
+    <div id="modal-overlay" style="display:none;">
+        <div class="ui-box">
+            <b id="modal-title" style="display:block; margin-bottom:12px;"></b>
+            <input type="text" id="modal-i1">
+            <input type="text" id="modal-i2" style="display:none;">
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button onclick="closeModal()" style="background:none; border:none; color:#777;">Отмена</button>
+                <button id="modal-ok" class="btn">ОК</button>
+            </div>
         </div>
     </div>
 
     <div id="sidebar">
         <div class="sidebar-header">
-            <b id="display-name">...</b>
-            <div id="display-id" style="font-size:10px; color:var(--accent);">ID: ...</div>
+            <b id="my-name" style="font-size:16px;">...</b>
+            <div id="my-id" style="font-size:11px; color:var(--accent); font-weight:bold;">ID: ...</div>
         </div>
         <div id="rooms-list"></div>
-        <div style="padding:10px; display:flex; gap:5px;">
-            <button onclick="createGroup()" class="btn" style="flex:1">+ Группа</button>
-            <button onclick="addFriend()" class="btn" style="flex:1; background:#222;">+ Друг</button>
+        <div style="padding:15px; display:flex; gap:8px;">
+            <button onclick="askGroup()" class="btn" style="flex:1; padding:10px 5px;">+Группа</button>
+            <button onclick="askFriend()" class="btn" style="flex:1; background:#222; padding:10px 5px;">+Друг</button>
         </div>
     </div>
 
@@ -107,18 +133,20 @@ app.get('/', (req, res) => {
         <div class="top-bar">
             <button onclick="document.getElementById('sidebar').classList.toggle('open')" style="background:none; border:none; color:white; font-size:24px;">☰</button>
             <b id="chat-title">G-chat</b>
-            <button id="add-btn" class="btn" style="display:none; padding:5px 10px;">+</button>
+            <button id="add-btn" class="btn" style="display:none; padding:5px 12px;">+</button>
         </div>
         <div id="messages"></div>
         <div id="input-zone">
-            <span class="icon" onclick="document.getElementById('file-in').click()">📎</span>
+            <span class="icon-btn" onclick="document.getElementById('file-in').click()">📎</span>
             <input type="file" id="file-in" hidden onchange="uploadFile()">
-            <input type="text" id="msg-in" placeholder="Сообщение..." autocomplete="off">
+            <input type="text" id="msg-in" placeholder="Напишите..." autocomplete="off">
+            
             <div id="voice-ui" class="rec-controls">
-                <span onclick="cancelVoice()" style="color:var(--danger)">🗑️</span>
-                <span onclick="stopVoice()" style="color:#22c55e">🛑</span>
+                <span onclick="cancelVoice()" style="color:var(--danger); cursor:pointer;">🗑️</span>
+                <span onclick="stopVoice()" style="color:#22c55e; cursor:pointer;">🛑 Отправить</span>
             </div>
-            <span id="mic-btn" class="icon" onclick="startVoice()">🎤</span>
+            
+            <span id="mic-btn" class="icon-btn" onclick="startVoice()">🎤</span>
             <button onclick="sendText()" class="btn">➤</button>
         </div>
     </div>
@@ -126,72 +154,89 @@ app.get('/', (req, res) => {
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let currentUser = JSON.parse(localStorage.getItem('gchat_user'));
-        let chats = JSON.parse(localStorage.getItem('gchat_chats')) || [];
-        let currentRoom = null;
-        let mediaRecorder, audioChunks = [], isCancel = false;
+        let me = JSON.parse(localStorage.getItem('g_user'));
+        let myChats = JSON.parse(localStorage.getItem('g_chats')) || [];
+        let curRoom = null;
+        let recorder, chunks = [], isCancel = false;
 
-        // Авторизация
-        if(currentUser) document.getElementById('auth-screen').style.display = 'none';
+        if(me) {
+            document.getElementById('auth-screen').style.display = 'none';
+            init();
+        }
 
-        function handleAuth(type) {
+        function doAuth(type) {
             const name = document.getElementById('auth-name').value;
             const pass = document.getElementById('auth-pass').value;
-            if(!name || !pass) return alert("Заполни поля!");
+            if(!name || !pass) return alert("Введите данные!");
 
             if(type === 'reg') {
                 const id = Math.floor(1000 + Math.random() * 8999);
-                currentUser = { name, pass, id };
-                localStorage.setItem('user_db_' + name, JSON.stringify(currentUser));
-                alert("Зарегистрирован! Теперь войди.");
+                const user = { name, pass, id };
+                localStorage.setItem('db_'+name, JSON.stringify(user));
+                alert("Готово! Войдите.");
             } else {
-                const db = JSON.parse(localStorage.getItem('user_db_' + name));
-                if(db && db.pass === pass) {
-                    currentUser = db;
-                    localStorage.setItem('gchat_user', JSON.stringify(currentUser));
+                const user = JSON.parse(localStorage.getItem('db_'+name));
+                if(user && user.pass === pass) {
+                    me = user;
+                    localStorage.setItem('g_user', JSON.stringify(me));
                     location.reload();
-                } else { alert("Неверно!"); }
+                } else alert("Ошибка!");
             }
         }
 
-        function saveChats() { localStorage.setItem('gchat_chats', JSON.stringify(chats)); }
+        function openModal(title, f2, cb) {
+            document.getElementById('modal-overlay').style.display = 'flex';
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-i1').value = '';
+            document.getElementById('modal-i1').placeholder = f2 ? "Имя" : "Название";
+            const i2 = document.getElementById('modal-i2');
+            i2.style.display = f2 ? 'block' : 'none';
+            i2.value = ''; i2.placeholder = "ID";
+            document.getElementById('modal-ok').onclick = () => {
+                cb(document.getElementById('modal-i1').value, i2.value);
+                closeModal();
+            };
+        }
+        function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
 
-        function createGroup() {
-            const n = prompt("Имя группы:");
-            if(n) {
-                const r = "grp-" + Date.now();
-                chats.push({name: n, room: r, type: 'group', admin: currentUser.id});
-                saveChats(); switchRoom(r);
-            }
+        function askGroup() {
+            openModal("Создать группу", false, (name) => {
+                if(!name) return;
+                const r = 'grp_'+Date.now();
+                myChats.push({name, room: r, type:'group', admin: me.id});
+                save(); switchRoom(r);
+            });
         }
 
-        function addFriend() {
-            const name = prompt("Имя друга:");
-            const id = prompt("ID друга:");
-            if(name && id) {
-                const r = [currentUser.id, parseInt(id)].sort().join('-');
-                if(!chats.find(c => c.room === r)) {
-                    chats.push({name: name, room: r, type: 'private'});
-                    saveChats();
+        function askFriend() {
+            openModal("Добавить друга", true, (name, id) => {
+                if(!name || !id) return;
+                const r = [me.id, parseInt(id)].sort().join('-');
+                if(!myChats.find(c => c.room === r)) {
+                    myChats.push({name, room: r, type:'private'});
+                    save();
                 }
                 switchRoom(r);
-            }
+            });
         }
 
+        function save() { localStorage.setItem('g_chats', JSON.stringify(myChats)); updateUI(); }
+
         function switchRoom(room) {
-            currentRoom = room;
-            const c = chats.find(x => x.room === room);
-            document.getElementById('chat-title').innerText = c ? c.name : "Чат";
+            curRoom = room;
+            const c = myChats.find(x => x.room === room);
+            document.getElementById('chat-title').innerText = c ? c.name : "G-chat";
             document.getElementById('messages').innerHTML = '';
             
             const addBtn = document.getElementById('add-btn');
-            if(c && c.type === 'group' && c.admin === currentUser.id) {
+            if(c && c.type === 'group' && c.admin === me.id) {
                 addBtn.style.display = 'block';
                 addBtn.onclick = () => {
-                    const id = prompt("ID игрока:");
-                    if(id) socket.emit('invite_to_group', { toId: parseInt(id), room: c.room, groupName: c.name });
+                    openModal("Пригласить по ID", false, (id) => {
+                        if(id) socket.emit('invite_to_group', {toId: parseInt(id), room: c.room, groupName: c.name});
+                    });
                 };
-            } else { addBtn.style.display = 'none'; }
+            } else addBtn.style.display = 'none';
 
             socket.emit('join_room', room);
             updateUI();
@@ -202,92 +247,85 @@ app.get('/', (req, res) => {
             if(document.getElementById('m-'+m.id)) return;
             const box = document.getElementById('messages');
             const d = document.createElement('div');
-            d.className = 'msg ' + (m.userId == currentUser.id ? 'me' : 'them');
+            d.className = 'msg ' + (m.userId == me.id ? 'me' : 'them');
             d.id = 'm-' + m.id;
             
-            let content = m.content;
-            if(m.type === 'voice') content = \`<audio src="\${m.content}" controls style="width:150px; height:30px;"></audio>\`;
-            if(m.type === 'file') content = \`<a href="\${m.content}" download="\${m.fileName}" style="color:#fff">📄 Файл</a>\`;
+            let html = m.content;
+            if(m.type === 'voice') html = \`<audio src="\${m.content}" controls style="width:160px; height:35px;"></audio>\`;
+            if(m.type === 'file') html = \`<a href="\${m.content}" download="\${m.fileName}" style="color:#fff; text-decoration:underline;">📄 \${m.fileName}</a>\`;
             
-            const del = m.userId == currentUser.id ? \`<span class="del-msg" onclick="deleteMsg('\${m.id}')">✕</span>\` : '';
-            d.innerHTML = \`<div class="msg-meta"><b>\${m.userName} (ID:\${m.userId})</b>\${del}</div><div>\${content}</div>\`;
+            const del = m.userId == me.id ? \`<span class="del-msg" onclick="deleteMsg('\${m.id}')">✕</span>\` : '';
+            d.innerHTML = \`<div class="msg-meta"><b>\${m.userName} (ID:\${m.userId})</b>\${del}</div><div>\${html}</div>\`;
             box.appendChild(d);
             box.scrollTop = box.scrollHeight;
         }
 
-        function deleteMsg(id) {
-            if(confirm("Удалить?")) socket.emit('delete_msg', {id, room: currentRoom});
-        }
-
-        socket.on('msg_deleted', id => {
-            const el = document.getElementById('m-'+id);
-            if(el) el.remove();
-        });
-
-        socket.on('new_msg', m => { if(m.room === currentRoom) renderMsg(m); });
-
-        socket.on('group_invite', d => {
-            if(!chats.find(c => c.room === d.room)) {
-                if(confirm("Инвайт в: " + d.name)) {
-                    chats.push({name: d.name, room: d.room, type: 'group', admin: d.adminId});
-                    saveChats(); updateUI();
-                }
-            }
-        });
+        function deleteMsg(id) { socket.emit('delete_msg', {id, room: curRoom}); }
+        socket.on('msg_deleted', id => { const el = document.getElementById('m-'+id); if(el) el.remove(); });
+        socket.on('new_msg', m => { if(m.room === curRoom) renderMsg(m); });
+        socket.on('load_history', h => h.forEach(renderMsg));
 
         function sendText() {
             const i = document.getElementById('msg-in');
-            if(i.value && currentRoom) {
-                socket.emit('send_msg', { room: currentRoom, userId: currentUser.id, userName: currentUser.name, type:'text', content: i.value });
+            if(i.value && curRoom) {
+                socket.emit('send_msg', { room: curRoom, userId: me.id, userName: me.name, type:'text', content: i.value });
                 i.value = '';
             }
         }
 
         async function startVoice() {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            audioChunks = []; isCancel = false;
+            recorder = new MediaRecorder(stream);
+            chunks = []; isCancel = false;
             document.getElementById('voice-ui').style.display = 'flex';
             document.getElementById('mic-btn').style.display = 'none';
-            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-            mediaRecorder.onstop = () => {
-                if(!isCancel) {
-                    const blob = new Blob(audioChunks, { type: 'audio/ogg' });
-                    const reader = new FileReader();
-                    reader.onload = () => socket.emit('send_msg', { room: currentRoom, userId: currentUser.id, userName: currentUser.name, type:'voice', content: reader.result });
-                    reader.readAsDataURL(blob);
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => {
+                if(!isCancel && chunks.length > 0) {
+                    const blob = new Blob(chunks, { type: 'audio/ogg' });
+                    const r = new FileReader();
+                    r.onload = () => socket.emit('send_msg', { room: curRoom, userId: me.id, userName: me.name, type:'voice', content: r.result });
+                    r.readAsDataURL(blob);
                 }
                 document.getElementById('voice-ui').style.display = 'none';
                 document.getElementById('mic-btn').style.display = 'flex';
             };
-            mediaRecorder.start();
+            recorder.start();
         }
-        function stopVoice() { mediaRecorder.stop(); }
-        function cancelVoice() { isCancel = true; mediaRecorder.stop(); }
+        function stopVoice() { recorder.stop(); }
+        function cancelVoice() { isCancel = true; recorder.stop(); }
 
         function uploadFile() {
             const f = document.getElementById('file-in').files[0];
             const r = new FileReader();
-            r.onload = () => socket.emit('send_msg', { room: currentRoom, userId: currentUser.id, userName: currentUser.name, type:'file', content: r.result, fileName: f.name });
+            r.onload = () => socket.emit('send_msg', { room: curRoom, userId: me.id, userName: me.name, type:'file', content: r.result, fileName: f.name });
             r.readAsDataURL(f);
         }
 
         function updateUI() {
-            if(!currentUser) return;
-            document.getElementById('display-name').innerText = currentUser.name;
-            document.getElementById('display-id').innerText = "ID: " + currentUser.id;
+            document.getElementById('my-name').innerText = me.name;
+            document.getElementById('my-id').innerText = "ID: " + me.id;
             const l = document.getElementById('rooms-list'); l.innerHTML = '';
-            chats.forEach(c => {
+            myChats.forEach(c => {
                 const d = document.createElement('div');
-                d.className = 'room-btn' + (currentRoom === c.room ? ' active' : '');
+                d.className = 'room-btn' + (curRoom === c.room ? ' active' : '');
                 d.onclick = () => switchRoom(c.room);
                 d.innerHTML = \`<b>\${c.name}</b>\`;
                 l.appendChild(d);
             });
         }
 
-        if(currentUser) {
-            socket.emit('register_me', currentUser.id);
+        socket.on('group_invite', d => {
+            if(!myChats.find(c => c.room === d.room)) {
+                if(confirm("Вас добавили в группу: " + d.name)) {
+                    myChats.push({name: d.name, room: d.room, type: 'group', admin: d.adminId});
+                    save();
+                }
+            }
+        });
+
+        function init() {
+            socket.emit('register_me', me.id);
             updateUI();
         }
     </script>
