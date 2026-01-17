@@ -6,7 +6,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8, cors: { origin: "*" } });
 
-// --- ТВОЯ ВЕЧНАЯ БАЗА ДАННЫХ ---
+// --- ТВОЯ ВЕЧНАЯ БАЗА ДАННЫХ (УЖЕ С ТВОИМ ПАРОЛЕМ) ---
 const MONGO_URI = "mongodb+srv://y0749278_db_user:11048011Aa@cluster0.nnrsbjx.mongodb.net/?appName=Cluster0";
 
 mongoose.connect(MONGO_URI)
@@ -27,7 +27,7 @@ const Msg = mongoose.model('Msg', msgSchema);
 
 io.on('connection', (socket) => {
     
-    // АВТОРИЗАЦИЯ И БЫСТРЫЙ ВХОД
+    // АВТОРИЗАЦИЯ
     socket.on('server_auth', async (data) => {
         const { name, pass, type } = data;
         if (type === 'reg') {
@@ -246,24 +246,27 @@ app.get('/', (req, res) => {
         function openM(t, mode) {
             document.getElementById('gen-modal').style.display='flex';
             document.getElementById('m-title').innerText = t;
+            document.getElementById('m-i1').value = '';
+            document.getElementById('m-i2').value = '';
             document.getElementById('m-i2').style.display = (mode === 2) ? 'block' : 'none';
             document.getElementById('m-ok').onclick = () => {
                 const v1 = document.getElementById('m-i1').value;
                 const v2 = document.getElementById('m-i2').value;
-                if(mode === 1) {
+                if(mode === 1 && v1) {
                     const r = 'grp_' + Date.now();
                     const c = {name: v1, room: r, type: 'group', admin: user.id};
                     chats.push(c);
                     socket.emit('save_chat_to_server', {uid: user.id, chat: c});
                     switchR(r);
-                } else if(mode === 2) {
+                } else if(mode === 2 && v1 && v2) {
                     const r = [user.id, parseInt(v2)].sort().join('_');
                     const c = {name: v1, room: r, type: 'private', tid: parseInt(v2)};
                     chats.push(c);
                     socket.emit('save_chat_to_server', {uid: user.id, chat: c});
                     switchR(r);
-                } else if(mode === 3) {
+                } else if(mode === 3 && v1) {
                     socket.emit('add_user_to_group', {targetId: v1, room: curRoom, chatName: document.getElementById('c-title').innerText});
+                    alert('Запрос отправлен');
                 }
                 closeModals();
             };
@@ -319,6 +322,7 @@ app.get('/', (req, res) => {
         }
 
         function stopVoice(send) {
+            if(!recorder) return;
             recorder.stop();
             document.getElementById('voice-panel').style.display = 'none';
             recorder.onstop = () => {
