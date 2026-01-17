@@ -2,84 +2,57 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
-
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { 
-    maxHttpBufferSize: 1e8, 
-    cors: { origin: "*" } 
-});
+const io = new Server(server, { maxHttpBufferSize: 1e8, cors: { origin: "*" } });
 
-// ТВОЯ ПРОВЕРЕННАЯ ССЫЛКА
 const MONGO_URI = "mongodb+srv://y0749278_db_user:11048011Aa@cluster0.nnrsbjx.mongodb.net/?appName=Cluster0";
+mongoose.connect(MONGO_URI).then(() => console.log("DB OK"));
 
-mongoose.connect(MONGO_URI)
-    .then(() => console.log("DATABASE CONNECTED"))
-    .catch(err => console.log("DB ERROR:", err));
-
-// Схемы данных для MongoDB
-const userSchema = new mongoose.Schema({ name: String, pass: String, id: Number });
-const chatSchema = new mongoose.Schema({ uid: Number, chats: Array });
-const msgSchema = new mongoose.Schema({
-    room: String, userId: Number, userName: String,
-    content: String, type: String, id: Number, date: Date
-});
-
-const User = mongoose.model('User', userSchema);
-const ChatList = mongoose.model('ChatList', chatSchema);
-const Msg = mongoose.model('Msg', msgSchema);
+const User = mongoose.model('User', new mongoose.Schema({ name: String, pass: String, id: Number }));
+const ChatList = mongoose.model('ChatList', new mongoose.Schema({ uid: Number, chats: Array }));
+const Msg = mongoose.model('Msg', new mongoose.Schema({ room: String, userId: Number, userName: String, content: String, type: String, date: Date }));
 
 io.on('connection', (socket) => {
-    
-    // АВТОРИЗАЦИЯ
     socket.on('server_auth', async (data) => {
         const { name, pass, type } = data;
+        let acc = await User.findOne({ name, pass });
         if (type === 'reg') {
-            const exist = await User.findOne({ name });
-            if (exist) return socket.emit('auth_error', 'Имя занято!');
+            if (await User.findOne({ name })) return socket.emit('auth_error', 'Имя занято!');
             const newId = Math.floor(10000 + Math.random() * 89999);
-            await new User({ name, pass, id: newId }).save();
+            acc = await new User({ name, pass, id: newId }).save();
             await new ChatList({ uid: newId, chats: [] }).save();
-            socket.emit('auth_success', { name, id: newId, pass });
-        } else {
-            const acc = await User.findOne({ name, pass });
-            if (acc) {
-                socket.emit('auth_success', { name: acc.name, id: acc.id, pass: acc.pass });
-                const list = await ChatList.findOne({ uid: acc.id });
-                socket.emit('sync_chats', list ? list.chats : []);
-            } else socket.emit('auth_error', 'Неверный пароль!');
         }
+        if (acc) {
+            socket.emit('auth_success', { name: acc.name, id: acc.id, pass: acc.pass });
+            const list = await ChatList.findOne({ uid: acc.id });
+            socket.emit('sync_chats', list ? list.chats : []);
+        } else socket.emit('auth_error', 'Ошибка входа');
     });
 
-    socket.on('register_me', (id) => { socket.join("user-" + id); });
-
-    socket.on('join_room', async (room) => { 
-        socket.join(room); 
-        const history = await Msg.find({ room }).sort({date: 1}).limit(100);
+    socket.on('register_me', (id) => socket.join("user-" + id));
+    
+    socket.on('join_room', async (room) => {
+        socket.join(room);
+        const history = await Msg.find({ room }).sort({date: 1}).limit(50);
         socket.emit('load_history', history);
     });
 
     socket.on('send_msg', async (data) => {
-        const msgData = { id: Date.now() + Math.random(), date: new Date(), ...data };
+        const msgData = { date: new Date(), ...data };
         await new Msg(msgData).save();
         io.to(data.room).emit('new_msg', msgData);
-
-        // Уведомление для личных сообщений
-        if(data.isPrivate) {
-            const uids = [data.userId, data.toId];
-            for (let uid of uids) {
-                let list = await ChatList.findOne({ uid });
-                if (list && !list.chats.find(c => c.room === data.room)) {
-                    list.chats.push({ name: data.userName, room: data.room, type: 'private', tid: data.userId });
-                    await ChatList.updateOne({ uid }, { chats: list.chats });
-                }
-            }
-        }
     });
 
-    socket.on('delete_msg', async (data) => {
-        await Msg.deleteOne({ id: data.id });
-        io.to(data.room).emit('msg_deleted', data.id);
+    // Добавление другого чела в группу
+    socket.on('invite_to_group', async (data) => {
+        const { friendId, chatObj } = data;
+        let list = await ChatList.findOne({ uid: friendId });
+        if(list && !list.chats.find(c => c.room === chatObj.room)) {
+            list.chats.push(chatObj);
+            await ChatList.updateOne({ uid: friendId }, { chats: list.chats });
+            io.to("user-" + friendId).emit('sync_chats', list.chats);
+        }
     });
 
     socket.on('save_chat_to_server', async (data) => {
@@ -91,195 +64,181 @@ io.on('connection', (socket) => {
     });
 });
 
-// ГЛАВНЫЙ ИНТЕРФЕЙС (HTML/CSS/JS)
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>G-Chat Pro</title>
     <style>
-        :root { --bg: #0b0e14; --panel: #151921; --accent: #7c3aed; --text: #ffffff; }
-        * { box-sizing: border-box; outline: none; margin: 0; padding: 0; }
-        body { display: flex; background: var(--bg); color: var(--text); height: 100vh; font-family: 'Segoe UI', sans-serif; }
-        
-        #auth-screen { position: fixed; inset: 0; background: #07080c; z-index: 1000; display: flex; align-items: center; justify-content: center; }
-        .box { background: var(--panel); padding: 30px; border-radius: 20px; width: 320px; border: 1px solid #333; text-align: center; }
-        input { width: 100%; background: #000; border: 1px solid #444; color: #fff; padding: 12px; border-radius: 12px; margin-bottom: 10px; }
-        
-        #sidebar { width: 300px; background: var(--panel); border-right: 1px solid #222; display: flex; flex-direction: column; }
-        .sb-head { padding: 20px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
-        #rooms-list { flex: 1; overflow-y: auto; padding: 10px; }
-        .room-btn { padding: 15px; margin-bottom: 8px; background: #1e293b; border-radius: 12px; cursor: pointer; transition: 0.2s; }
-        .room-btn:hover { background: #2d3748; }
-        .room-btn.active { border: 2px solid var(--accent); background: #2d1b4d; }
-
-        #chat-main { flex: 1; display: flex; flex-direction: column; background: #07080c; }
-        .top-bar { height: 60px; padding: 0 20px; background: var(--panel); display: flex; align-items: center; border-bottom: 1px solid #333; }
-        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
-        .msg { max-width: 75%; padding: 12px; border-radius: 15px; position: relative; font-size: 15px; }
-        .msg.me { align-self: flex-end; background: var(--accent); color: white; }
-        .msg.them { align-self: flex-start; background: #1e293b; }
-        .del-btn { font-size: 10px; color: #ff4d4d; cursor: pointer; margin-left: 10px; }
-
-        #input-zone { padding: 15px; background: var(--panel); display: flex; gap: 10px; }
-        #msg-in { flex: 1; background: #000; border: 1px solid #444; color: white; padding: 12px; border-radius: 12px; }
-        .btn { background: var(--accent); border: none; color: white; padding: 10px 15px; border-radius: 10px; cursor: pointer; font-weight: bold; }
-        
-        .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; align-items:center; justify-content:center; }
+        body { margin: 0; background: #0b0e14; color: white; font-family: sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        #auth { position: fixed; inset: 0; background: #07080c; z-index: 100; display: flex; align-items: center; justify-content: center; }
+        .box { background: #151921; padding: 30px; border-radius: 20px; width: 300px; text-align: center; border: 1px solid #333; }
+        input { width: 100%; background: #000; border: 1px solid #444; color: #fff; padding: 12px; border-radius: 10px; margin-bottom: 10px; }
+        button { background: #7c3aed; color: white; border: none; padding: 10px; border-radius: 10px; cursor: pointer; }
+        #sidebar { width: 250px; border-right: 1px solid #222; display: flex; flex-direction: column; background: #151921; }
+        #chat { flex: 1; display: flex; flex-direction: column; background: #07080c; }
+        #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; }
+        .msg { padding: 10px; border-radius: 10px; max-width: 80%; word-break: break-word; }
+        .me { background: #7c3aed; align-self: flex-end; }
+        .them { background: #222; align-self: flex-start; }
+        #input-area { padding: 15px; display: flex; gap: 8px; background: #151921; align-items: center; }
+        .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:200; align-items:center; justify-content:center; }
+        img { max-width: 200px; border-radius: 10px; display: block; margin-top: 5px; }
+        .active-room { border-left: 4px solid #7c3aed; background: #1e2530; }
     </style>
 </head>
 <body>
-
-    <div id="auth-screen">
-        <div class="box">
-            <h2 style="color:var(--accent); margin-bottom:20px;">G-CHAT PRO</h2>
-            <input type="text" id="a-name" placeholder="Логин">
-            <input type="password" id="a-pass" placeholder="Пароль">
-            <button onclick="auth('login')" class="btn" style="width:100%; margin-bottom:10px;">ВХОД</button>
-            <button onclick="auth('reg')" class="btn" style="width:100%; background:#222;">РЕГИСТРАЦИЯ</button>
-        </div>
-    </div>
+    <div id="auth"><div class="box"><h2>G-CHAT</h2><input id="an" placeholder="Логин"><input id="ap" type="password" placeholder="Пароль"><button onclick="auth('login')" style="width:100%">Вход</button><br><br><button style="background:#222; width:100%" onclick="auth('reg')">Регистрация</button></div></div>
+    
+    <div id="prof-modal" class="modal"><div class="box"><h3>ПРОФИЛЬ</h3><p id="p-info"></p><button onclick="logout()" style="background:red; width:100%">Выйти</button><br><br><button onclick="prof_modal.style.display='none'" style="width:100%">Закрыть</button></div></div>
 
     <div id="sidebar">
-        <div class="sb-head">
-            <div><b id="u-name">...</b><br><small id="u-id" style="color:#aaa"></small></div>
-            <button onclick="location.reload()" style="background:none; border:none; cursor:pointer">🚪</button>
+        <div style="padding:15px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center">
+            <div><b id="my-name"></b><br><small id="my-id"></small></div>
+            <button onclick="showProf()" style="background:none; font-size:20px">⚙️</button>
         </div>
-        <div id="rooms-list"></div>
-        <div style="padding:15px; display:flex; gap:5px;">
-            <button onclick="openM('Группа', 1)" class="btn" style="flex:1">+ ГРУППА</button>
-            <button onclick="openM('Личка (ID)', 2)" class="btn" style="flex:1; background:#222">+ ЛС</button>
+        <div id="rooms" style="flex:1; overflow-y:auto"></div>
+        <div style="padding:10px; display:grid; gap:5px">
+            <button onclick="addLS()">+ Личка (ID)</button>
+            <button onclick="createGrp()">+ Группа</button>
+            <button id="inv-btn" style="display:none; background:#222" onclick="invite()">+ Добавить друга в этот чат</button>
         </div>
     </div>
 
-    <div id="chat-main">
-        <div class="top-bar"><b id="c-title">Выберите диалог</b></div>
+    <div id="chat">
         <div id="messages"></div>
-        <div id="input-zone">
-            <input type="text" id="msg-in" placeholder="Написать сообщение...">
-            <button onclick="sendMsg()" class="btn">ОТПРАВИТЬ</button>
-        </div>
-    </div>
-
-    <div id="gen-modal" class="modal">
-        <div class="box">
-            <h3 id="m-title"></h3><br>
-            <input type="text" id="m-i1" placeholder="Имя/ID">
-            <button id="m-ok" class="btn" style="width:100%">СОЗДАТЬ</button>
-            <button onclick="closeM()" class="btn" style="width:100%; background:#222; margin-top:10px">ОТМЕНА</button>
+        <div id="input-area">
+            <button onclick="f_in.click()">📷</button>
+            <input type="file" id="f_in" hidden accept="image/*" onchange="sendImg(this)">
+            <button id="v_btn" onclick="startVoice()">🎤</button>
+            <input id="mi" style="margin:0" placeholder="Сообщение...">
+            <button onclick="sendText()">➤</button>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
-        let user = null, chats = [], curRoom = null;
-
-        function auth(type) {
-            const name = document.getElementById('a-name').value;
-            const pass = document.getElementById('a-pass').value;
-            if(!name || !pass) return alert("Заполни поля");
-            socket.emit('server_auth', { name, pass, type });
-        }
-
-        socket.on('auth_success', acc => {
-            user = acc;
-            document.getElementById('auth-screen').style.display = 'none';
-            document.getElementById('u-name').innerText = user.name;
-            document.getElementById('u-id').innerText = "ID: " + user.id;
-            socket.emit('register_me', user.id);
-        });
-
-        socket.on('sync_chats', c => { chats = c; updSidebar(); });
-        socket.on('auth_error', e => alert(e));
-
-        function openM(t, mode) {
-            document.getElementById('gen-modal').style.display='flex';
-            document.getElementById('m-title').innerText = t;
-            document.getElementById('m-ok').onclick = () => {
-                const val = document.getElementById('m-i1').value;
-                if(!val) return;
-                if(mode === 1) {
-                    const r = 'grp_' + Date.now();
-                    const c = {name: val, room: r, type: 'group'};
-                    chats.push(c);
-                    socket.emit('save_chat_to_server', {uid: user.id, chat: c});
-                    switchRoom(r);
-                } else {
-                    const tid = parseInt(val);
-                    const r = [user.id, tid].sort().join('_');
-                    const c = {name: 'Чат с ' + tid, room: r, type: 'private', tid: tid};
-                    chats.push(c);
-                    socket.emit('save_chat_to_server', {uid: user.id, chat: c});
-                    switchRoom(r);
-                }
-                closeM();
-            };
-        }
-
-        function switchRoom(r) {
-            curRoom = r;
-            const c = chats.find(x => x.room === r);
-            document.getElementById('c-title').innerText = c ? c.name : "Чат";
-            document.getElementById('messages').innerHTML = '';
-            socket.emit('join_room', r);
-            updSidebar();
-        }
-
-        function sendMsg() {
-            const i = document.getElementById('msg-in');
-            const c = chats.find(x => x.room === curRoom);
-            if(i.value && curRoom) {
-                socket.emit('send_msg', { 
-                    room: curRoom, 
-                    userId: user.id, 
-                    userName: user.name, 
-                    content: i.value, 
-                    isPrivate: c.type === 'private',
-                    toId: c.tid
-                });
-                i.value = '';
+        const socket = io(); let user, curRoom, rec, chunks = [];
+        
+        // АВТО-ВХОД
+        window.onload = () => {
+            const saved = localStorage.getItem('gchat_user');
+            if(saved) {
+                const {name, pass} = JSON.parse(saved);
+                socket.emit('server_auth', {name, pass, type:'login'});
             }
         }
 
-        socket.on('load_history', h => h.forEach(renderMsg));
-        socket.on('new_msg', m => { if(m.room === curRoom) renderMsg(m); });
-
-        function renderMsg(m) {
-            const b = document.getElementById('messages');
-            const d = document.createElement('div');
-            d.className = 'msg ' + (m.userId === user.id ? 'me' : 'them');
-            d.id = 'msg-' + m.id;
-            const del = m.userId === user.id ? \`<span class="del-btn" onclick="delMsg('\${m.id}')">Удалить</span>\` : '';
-            d.innerHTML = \`<div style="font-size:11px; opacity:0.7">\${m.userName} \${del}</div>\${m.content}\`;
-            b.appendChild(d);
-            b.scrollTop = b.scrollHeight;
+        function auth(t){
+            const name = an.value, pass = ap.value;
+            socket.emit('server_auth', {name, pass, type:t});
         }
 
-        function delMsg(id) { socket.emit('delete_msg', {id, room: curRoom}); }
-        socket.on('msg_deleted', id => { document.getElementById('msg-' + id)?.remove(); });
+        socket.on('auth_success', a => {
+            user=a;
+            localStorage.setItem('gchat_user', JSON.stringify({name:a.name, pass:a.pass}));
+            auth.style.display='none';
+            my_name.innerText=user.name;
+            my_id.innerText="ID: "+user.id;
+            socket.emit('register_me', user.id);
+        });
 
-        function updSidebar() {
-            const l = document.getElementById('rooms-list');
-            l.innerHTML = '';
-            chats.forEach(c => {
-                const d = document.createElement('div');
-                d.className = 'room-btn' + (curRoom === c.room ? ' active' : '');
-                d.innerHTML = \`<b>\${c.name}</b>\`;
-                d.onclick = () => switchRoom(c.room);
-                l.appendChild(d);
+        socket.on('auth_error', e => { alert(e); localStorage.removeItem('gchat_user'); });
+        
+        function showProf(){ p_info.innerHTML="ID: "+user.id+"<br>Логин: "+user.name+"<br>Пароль: "+user.pass; prof_modal.style.display='flex'; }
+        function logout(){ localStorage.removeItem('gchat_user'); location.reload(); }
+
+        socket.on('sync_chats', c => {
+            rooms.innerHTML='';
+            c.forEach(i => {
+                let d=document.createElement('div');
+                d.style.padding='15px'; d.style.borderBottom='1px solid #222'; d.style.cursor='pointer';
+                d.className = (curRoom === i.room) ? 'active-room' : '';
+                d.innerText=i.name;
+                d.onclick=()=>join(i);
+                rooms.append(d);
             });
+        });
+
+        function addLS(){
+            let id=prompt("ID друга"), n=prompt("Имя для чата");
+            if(id&&n){
+                let r=[user.id, parseInt(id)].sort().join('_');
+                let c={name:n, room:r, type:'private', tid:parseInt(id)};
+                socket.emit('save_chat_to_server',{uid:user.id, chat:c});
+                join(c);
+            }
         }
-        function closeM() { document.getElementById('gen-modal').style.display='none'; }
+
+        function createGrp(){
+            let n=prompt("Название группы");
+            if(n){
+                let r='grp_'+Date.now();
+                let c={name:n, room:r, type:'group'};
+                socket.emit('save_chat_to_server',{uid:user.id, chat:c});
+                join(c);
+            }
+        }
+
+        function invite(){
+            let id = prompt("Введите ID друга, чтобы добавить его в этот чат:");
+            if(id){
+                let c = {name: document.title, room: curRoom, type: 'group'}; 
+                socket.emit('invite_to_group', {friendId: parseInt(id), chatObj: c});
+                alert("Запрос отправлен!");
+            }
+        }
+
+        function join(c){
+            curRoom=c.room;
+            document.title = c.name;
+            inv_btn.style.display = 'block';
+            messages.innerHTML='';
+            socket.emit('join_room', c.room);
+            // Визуально выделяем чат
+            Array.from(rooms.children).forEach(el => el.classList.remove('active-room'));
+        }
+
+        function sendText(){ if(mi.value && curRoom){ socket.emit('send_msg', {room:curRoom, userId:user.id, userName:user.name, content:mi.value, type:'text'}); mi.value=''; }}
+        
+        function sendImg(input){
+            let file = input.files[0];
+            let reader = new FileReader();
+            reader.onload = () => { socket.emit('send_msg', {room:curRoom, userId:user.id, userName:user.name, content:reader.result, type:'img'}); };
+            reader.readAsDataURL(file);
+        }
+
+        async function startVoice(){
+            if(rec && rec.state === "recording"){ rec.stop(); v_btn.style.background='#7c3aed'; return; }
+            let s = await navigator.mediaDevices.getUserMedia({audio:true});
+            rec = new MediaRecorder(s); chunks = [];
+            rec.ondataavailable = e => chunks.push(e.data);
+            rec.onstop = () => {
+                let blob = new Blob(chunks, {type:'audio/webm'});
+                let r = new FileReader();
+                r.onload = () => socket.emit('send_msg', {room:curRoom, userId:user.id, userName:user.name, content:r.result, type:'audio'});
+                r.readAsDataURL(blob);
+            };
+            rec.start(); v_btn.style.background='red';
+        }
+
+        socket.on('load_history', h => h.forEach(render));
+        socket.on('new_msg', m => { if(m.room===curRoom) render(m); });
+        
+        function render(m){
+            let d=document.createElement('div'); d.className='msg '+(m.userId===user.id?'me':'them');
+            let content = m.content;
+            if(m.type==='img') content = '<img src="'+m.content+'">';
+            if(m.type==='audio') content = '<audio src="'+m.content+'" controls style="width:200px"></audio>';
+            d.innerHTML='<small style="opacity:0.6">'+m.userName+'</small><br>'+content;
+            messages.append(d); messages.scrollTop=messages.scrollHeight;
+        }
     </script>
 </body>
 </html>
     `);
 });
 
-server.listen(process.env.PORT || 3000, () => {
-    console.log('SERVER RUNNING ON PORT 3000');
-});
+server.listen(process.env.PORT || 3000);
