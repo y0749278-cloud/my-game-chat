@@ -7,14 +7,13 @@ const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8, cors: { origin: "*" } });
 
 const MONGO_URI = "mongodb+srv://y0749278_db_user:11048011Aa@cluster0.nnrsbjx.mongodb.net/?appName=Cluster0";
-mongoose.connect(MONGO_URI).then(() => console.log("DB CONNECTED"));
+mongoose.connect(MONGO_URI).then(() => console.log("G-CHAT CORE STARTED"));
 
 const User = mongoose.model('User', new mongoose.Schema({ name: String, pass: String, id: Number }));
 const ChatList = mongoose.model('ChatList', new mongoose.Schema({ uid: Number, chats: Array }));
 const Msg = mongoose.model('Msg', new mongoose.Schema({ room: String, userId: Number, userName: String, content: String, type: String, id: Number, date: Date }));
 
 io.on('connection', (socket) => {
-    // РАБОЧАЯ РЕГИСТРАЦИЯ/ВХОД
     socket.on('server_auth', async (data) => {
         const { name, pass } = data;
         let acc = await User.findOne({ name });
@@ -26,9 +25,9 @@ io.on('connection', (socket) => {
             } else { socket.emit('auth_error', 'Неверный пароль!'); }
         } else {
             const newId = Math.floor(10000 + Math.random() * 89999);
-            const newUser = await new User({ name, pass, id: newId }).save();
+            await new User({ name, pass, id: newId }).save();
             await new ChatList({ uid: newId, chats: [] }).save();
-            socket.emit('auth_success', { name: newUser.name, id: newUser.id, pass: newUser.pass });
+            socket.emit('auth_success', { name, id: newId, pass });
             socket.emit('sync_chats', []);
         }
     });
@@ -46,9 +45,9 @@ io.on('connection', (socket) => {
         io.to(data.room).emit('new_msg', msgData);
     });
 
-    socket.on('delete_msg', async (data) => {
-        await Msg.deleteOne({ id: data.id });
-        io.to(data.room).emit('msg_deleted', data.id);
+    socket.on('delete_msg', async (id) => {
+        await Msg.deleteOne({ id: id });
+        io.emit('msg_deleted', id);
     });
 
     socket.on('save_chat_to_server', async (data) => {
@@ -64,154 +63,168 @@ io.on('connection', (socket) => {
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>G-Chat</title>
+    <title>G-CHAT PRO</title>
     <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; background: #0b0e14; color: white; font-family: sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        :root { --bg: #0b0e14; --panel: #161b22; --accent: #7c3aed; --text: #e6edf3; }
+        * { box-sizing: border-box; outline: none; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        
         #auth-screen { position: fixed; inset: 0; background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .auth-card { background: #151921; padding: 30px; border-radius: 20px; width: 100%; max-width: 340px; text-align: center; }
-        input { width: 100%; background: #000; border: 1px solid #444; color: #fff; padding: 15px; border-radius: 12px; margin-bottom: 10px; font-size: 16px; }
-        .btn { background: #7c3aed; color: #fff; border: none; padding: 15px; border-radius: 12px; width: 100%; cursor: pointer; font-weight: bold; }
+        .auth-card { background: var(--panel); padding: 35px; border-radius: 24px; width: 100%; max-width: 350px; text-align: center; border: 1px solid #30363d; }
         
-        #sidebar { width: 280px; background: #151921; border-right: 1px solid #222; display: flex; flex-direction: column; }
-        .room-btn { padding: 15px; border-bottom: 1px solid #222; cursor: pointer; }
-        .room-btn.active { background: #1c2128; border-left: 4px solid #7c3aed; }
+        input { width: 100%; background: #0d1117; border: 1px solid #30363d; color: #fff; padding: 14px; border-radius: 12px; margin-bottom: 12px; font-size: 16px; }
+        .btn { background: var(--accent); color: #fff; border: none; padding: 14px; border-radius: 12px; width: 100%; cursor: pointer; font-weight: 600; font-size: 16px; transition: 0.2s; }
+        .btn:active { transform: scale(0.98); opacity: 0.9; }
 
-        #chat-window { flex: 1; display: flex; flex-direction: column; background: #07080c; position: relative; }
-        #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .msg { max-width: 85%; padding: 10px 15px; border-radius: 15px; font-size: 15px; position: relative; }
-        .me { align-self: flex-end; background: #7c3aed; }
-        .them { align-self: flex-start; background: #222; }
+        #sidebar { width: 300px; background: var(--panel); border-right: 1px solid #30363d; display: flex; flex-direction: column; transition: 0.3s; z-index: 500; }
+        .room-item { padding: 15px 20px; cursor: pointer; border-bottom: 1px solid #21262d; }
+        .room-item.active { background: #1c2128; border-left: 4px solid var(--accent); }
+
+        #chat-main { flex: 1; display: flex; flex-direction: column; background: #0d1117; }
+        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .msg { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 15px; line-height: 1.4; position: relative; }
+        .me { align-self: flex-end; background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+        .them { align-self: flex-start; background: #21262d; border-bottom-left-radius: 4px; }
         
-        #input-bar { padding: 10px; background: #151921; display: flex; gap: 8px; align-items: center; }
-        .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:5000; align-items:center; justify-content:center; }
+        #input-area { padding: 15px; background: var(--panel); display: flex; gap: 10px; align-items: center; }
+        .icon-btn { background: none; border: none; color: #8b949e; font-size: 22px; cursor: pointer; }
         
-        @media (max-width: 600px) {
-            #sidebar { display: none; }
-            #sidebar.show { display: flex; position: absolute; width: 100%; height: 100%; z-index: 100; }
+        @media (max-width: 768px) {
+            #sidebar { position: absolute; left: -100%; width: 85%; height: 100%; }
+            #sidebar.open { left: 0; }
         }
     </style>
 </head>
 <body>
     <div id="auth-screen">
         <div class="auth-card">
-            <h2 style="color:#7c3aed">G-CHAT</h2>
-            <input id="login-name" placeholder="Логин">
-            <input id="login-pass" type="password" placeholder="Пароль">
-            <button class="btn" onclick="doAuth()">ВОЙТИ / СОЗДАТЬ</button>
+            <h1 style="color:var(--accent); margin-top:0">G-CHAT PRO</h1>
+            <input id="un" placeholder="Логин">
+            <input id="up" type="password" placeholder="Пароль">
+            <button class="btn" onclick="doAuth()">ВХОД / РЕГИСТРАЦИЯ</button>
         </div>
     </div>
 
     <div id="sidebar">
-        <div style="padding:20px; border-bottom:1px solid #333">
-            <b id="display-name">...</b><br><small id="display-id" style="opacity:0.5"></small>
-            <button onclick="logout()" style="margin-top:10px; width:100%; font-size:10px">ВЫЙТИ</button>
+        <div style="padding:20px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center">
+            <div><b id="my-name"></b><br><small id="my-id" style="opacity:0.5"></small></div>
+            <button onclick="logout()" style="background:none; border:1px solid #333; color:white; border-radius:8px; padding:4px 8px; font-size:10px">ВЫХОД</button>
         </div>
         <div id="rooms-list" style="flex:1; overflow-y:auto"></div>
-        <div style="padding:10px">
-            <button class="btn" onclick="addFriend()">+ ЛИЧКА (ID)</button>
+        <div style="padding:15px">
+            <button class="btn" style="background:#21262d; font-size:14px" onclick="addFriend()">+ ДОБАВИТЬ ДРУГА</button>
         </div>
     </div>
 
-    <div id="chat-window">
-        <div style="padding:10px; background:#151921; display:flex; align-items:center">
-            <button onclick="document.getElementById('sidebar').classList.toggle('show')" style="background:none; border:none; color:white; font-size:20px; margin-right:10px">☰</button>
-            <b id="current-chat-title">Выберите чат</b>
+    <div id="chat-main">
+        <div style="height:60px; background:var(--panel); border-bottom:1px solid #30363d; display:flex; align-items:center; padding:0 15px; gap:15px">
+            <button class="icon-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+            <b id="chat-title">Выберите чат</b>
         </div>
         <div id="messages"></div>
-        <div id="input-bar">
-            <button onclick="f_in.click()" style="background:none; border:none; font-size:20px">📷</button>
-            <input type="file" id="f_in" hidden accept="image/*" onchange="sendPhoto(this)">
-            <input id="msg-input" placeholder="Текст..." style="margin:0" onkeypress="if(event.key=='Enter')sendMsg()">
-            <button onclick="sendMsg()" style="background:none; border:none; font-size:20px; color:#7c3aed">➤</button>
+        <div id="input-area">
+            <button class="icon-btn" onclick="f_in.click()">📷</button>
+            <input type="file" id="f_in" hidden accept="image/*" onchange="sendImg(this)">
+            <input id="mi" placeholder="Сообщение..." style="margin:0" onkeypress="if(event.key=='Enter')send()">
+            <button class="icon-btn" style="color:var(--accent)" onclick="send()">➤</button>
         </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io(); let me = null, activeRoom = null;
+        const socket = io();
+        let user = null, currentRoom = null;
+
+        // Авторизация
+        window.doAuth = function() {
+            const name = document.getElementById('un').value;
+            const pass = document.getElementById('up').value;
+            if(name && pass) socket.emit('server_auth', {name, pass});
+        };
 
         window.onload = () => {
-            const data = localStorage.getItem('gchat_user_v6');
-            if(data) socket.emit('server_auth', JSON.parse(data));
-        }
-
-        function doAuth() {
-            const name = document.getElementById('login-name').value;
-            const pass = document.getElementById('login-pass').value;
-            if(name && pass) socket.emit('server_auth', {name, pass});
-        }
+            const saved = localStorage.getItem('gchat_v7');
+            if(saved) socket.emit('server_auth', JSON.parse(saved));
+        };
 
         socket.on('auth_success', data => {
-            me = data; localStorage.setItem('gchat_user_v6', JSON.stringify({name:data.name, pass:data.pass}));
+            user = data;
+            localStorage.setItem('gchat_v7', JSON.stringify({name:data.name, pass:data.pass}));
             document.getElementById('auth-screen').style.display = 'none';
-            document.getElementById('display-name').innerText = me.name;
-            document.getElementById('display-id').innerText = "ID: " + me.id;
-            socket.emit('register_me', me.id);
+            document.getElementById('my-name').innerText = user.name;
+            document.getElementById('my-id').innerText = "ID: " + user.id;
+            socket.emit('register_me', user.id);
         });
 
         socket.on('auth_error', msg => alert(msg));
-        function logout() { localStorage.removeItem('gchat_user_v6'); location.reload(); }
+        window.logout = () => { localStorage.removeItem('gchat_v7'); location.reload(); };
 
+        // Чаты
         socket.on('sync_chats', list => {
-            const container = document.getElementById('rooms-list');
-            container.innerHTML = '';
-            list.forEach(chat => {
-                const div = document.createElement('div');
-                div.className = 'room-btn' + (activeRoom === chat.room ? ' active' : '');
-                div.innerText = chat.name;
-                div.onclick = () => {
-                    activeRoom = chat.room;
-                    document.getElementById('current-chat-title').innerText = chat.name;
+            const cont = document.getElementById('rooms-list');
+            cont.innerHTML = '';
+            list.forEach(c => {
+                const d = document.createElement('div');
+                d.className = 'room-item' + (currentRoom === c.room ? ' active' : '');
+                d.innerText = c.name;
+                d.onclick = () => {
+                    currentRoom = c.room;
+                    document.getElementById('chat-title').innerText = c.name;
                     document.getElementById('messages').innerHTML = '';
-                    socket.emit('join_room', chat.room);
-                    document.getElementById('sidebar').classList.remove('show');
+                    socket.emit('join_room', c.room);
+                    document.getElementById('sidebar').classList.remove('open');
                 };
-                container.appendChild(div);
+                cont.appendChild(d);
             });
         });
 
-        function sendMsg() {
-            const input = document.getElementById('msg-input');
-            if(input.value && activeRoom) {
-                socket.emit('send_msg', { room: activeRoom, userId: me.id, userName: me.name, content: input.value, type: 'text' });
+        window.addFriend = () => {
+            const id = prompt("Введите ID друга:");
+            const name = prompt("Имя для чата:");
+            if(id && name) {
+                const room = [user.id, parseInt(id)].sort().join('_');
+                socket.emit('save_chat_to_server', { uid: user.id, chat: { name, room, type: 'private' } });
+            }
+        };
+
+        // Сообщения
+        window.send = () => {
+            const input = document.getElementById('mi');
+            if(input.value && currentRoom) {
+                socket.emit('send_msg', { room: currentRoom, userId: user.id, userName: user.name, content: input.value, type: 'text' });
                 input.value = '';
             }
-        }
+        };
 
-        function sendPhoto(input) {
+        window.sendImg = (input) => {
             const reader = new FileReader();
-            reader.onload = () => socket.emit('send_msg', { room: activeRoom, userId: me.id, userName: me.name, content: reader.result, type: 'img' });
+            reader.onload = () => socket.emit('send_msg', { room: currentRoom, userId: user.id, userName: user.name, content: reader.result, type: 'img' });
             reader.readAsDataURL(input.files[0]);
-        }
-
-        function addFriend() {
-            const id = prompt("Введите ID друга:");
-            const name = prompt("Как назвать чат?");
-            if(id && name) {
-                const room = [me.id, parseInt(id)].sort().join('_');
-                socket.emit('save_chat_to_server', { uid: me.id, chat: { name, room, type: 'private' } });
-            }
-        }
+        };
 
         socket.on('load_history', h => h.forEach(render));
-        socket.on('new_msg', m => { if(m.room === activeRoom) render(m); });
-        socket.on('msg_deleted', id => document.getElementById('m-'+id)?.remove());
+        socket.on('new_msg', m => { if(m.room === currentRoom) render(m); });
+        socket.on('msg_deleted', id => { const el = document.getElementById('m-'+id); if(el) el.remove(); });
 
         function render(m) {
-            const container = document.getElementById('messages');
-            const div = document.createElement('div');
-            div.id = 'm-' + m.id;
-            div.className = 'msg ' + (m.userId === me.id ? 'me' : 'them');
-            let body = m.content;
-            if(m.type === 'img') body = '<img src="'+m.content+'" style="max-width:100%; border-radius:10px">';
-            const del = (m.userId === me.id) ? '<span onclick="socket.emit(\'delete_msg\',{id:'+m.id+',room:activeRoom})" style="color:red; margin-left:10px; cursor:pointer">✖</span>' : '';
-            div.innerHTML = '<div style="font-size:10px; opacity:0.5">'+m.userName+del+'</div>' + body;
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
+            const cont = document.getElementById('messages');
+            const d = document.createElement('div');
+            d.id = 'm-' + m.id;
+            d.className = 'msg ' + (m.userId === user.id ? 'me' : 'them');
+            
+            let content = m.content;
+            if(m.type === 'img') content = '<img src="'+m.content+'" style="max-width:100%; border-radius:10px; margin-top:5px">';
+            
+            // Кнопка удаления (только для своих)
+            const delBtn = (m.userId === user.id) ? 
+                '<span style="color:#ff7b72; margin-left:10px; cursor:pointer" onclick="socket.emit(\\'delete_msg\\','+m.id+')">✖</span>' : '';
+
+            d.innerHTML = '<div style="font-size:11px; opacity:0.5; margin-bottom:4px"><b>'+m.userName+'</b>'+delBtn+'</div>' + content;
+            cont.appendChild(d);
+            cont.scrollTop = cont.scrollHeight;
         }
     </script>
 </body>
